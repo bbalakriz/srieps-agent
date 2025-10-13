@@ -1,0 +1,11 @@
+# Common exclusions
+.git
+__pycache__/
+*.pyc
+
+# Exclude the Python virtual environment
+venv/
+custom_playbooks/custom_actions/venv
+custom_playbooks/.git
+custom_playbooks/venv
+custom_playbooks/custom_actions/requirements.txt

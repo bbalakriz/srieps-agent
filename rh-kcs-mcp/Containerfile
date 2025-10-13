@@ -1,0 +1,25 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files
+COPY . /app
+
+# Install deps (FastMCP, plus repo deps)
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install fastmcp . 
+
+# Expose FastMCP port
+EXPOSE 8000
+
+# RH token injected at runtime
+ENV RH_API_OFFLINE_TOKEN=""
+
+# Run the FastMCP server
+CMD ["fastmcp", "serve", "redhat_mcp_server:app", "--host", "0.0.0.0", "--port", "8000"]

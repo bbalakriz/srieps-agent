@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "custom_actions"
+version = "0.0.1"
+description = ""
+authors = ["bala <bbalakriz@users.noreply.github.com>"]
+
+[tool.poetry.dependencies]
+# if your playbook requires additional dependencies, add them here
+#some-dependency = "^1.2.3"
+
+[tool.poetry.dev-dependencies]
+robusta-api = "^0.14"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

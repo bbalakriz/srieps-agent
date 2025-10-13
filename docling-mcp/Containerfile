@@ -1,0 +1,29 @@
+# Use official Python base (since uv requires Python >=3.11)
+FROM python:3.13-slim
+
+# Set working dir
+WORKDIR /app
+
+# Install system dependencies (for building Python deps)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv package manager
+RUN pip install --upgrade pip \
+    && pip install uv
+
+ENV UV_HTTP_TIMEOUT=3000
+
+# Clone the repo
+RUN git clone https://github.com/docling-project/docling-mcp.git /app
+
+# Install project dependencies using uv
+RUN uv sync
+chmod +R /usr
+
+# Expose server port
+EXPOSE 8000
+
+# Default command: run Docling MCP server with HTTP transport
+CMD ["uv", "run", "docling-mcp-server", "--transport", "sse", "--port", "8000", "--host", "0.0.0.0"]

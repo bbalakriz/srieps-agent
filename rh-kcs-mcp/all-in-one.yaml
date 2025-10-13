@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redhat-api-token
+type: Opaque
+stringData:
+  RH_API_OFFLINE_TOKEN: "${RH_API_OFFLINE_TOKEN}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redhat-api-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redhat-api-mcp
+  template:
+    metadata:
+      labels:
+        app: redhat-api-mcp
+    spec:
+      containers:
+        - name: mcp
+          image: quay.io/balki404/rh-kcs-mcp:0.0.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: RH_API_OFFLINE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: redhat-api-token
+                  key: RH_API_OFFLINE_TOKEN
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redhat-api-mcp
+spec:
+  selector:
+    app: redhat-api-mcp
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: redhat-api-mcp
+spec:
+  to:
+    kind: Service
+    name: redhat-api-mcp
+  port:
+    targetPort: http
+  tls:
+    termination: edge  
+    insecureEdgeTerminationPolicy: Redirect
+---
+
+

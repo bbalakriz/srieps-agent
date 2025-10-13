@@ -1,0 +1,576 @@
+---
+# Source: robusta/templates/forwarder-service-account.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: robusta-forwarder-service-account
+  namespace: robusta
+---
+# Source: robusta/templates/runner-service-account.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: robusta-runner-service-account
+  namespace: robusta
+---
+# Source: robusta/templates/playbooks-config.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: robusta-playbooks-config-secret
+  namespace: robusta
+type: Opaque
+data:
+  active_playbooks.yaml: |-
+    ***REMOVED***
+---
+# Source: robusta/templates/runner.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: robusta-runner-secret
+  namespace: robusta
+type: Opaque
+stringData:
+  SENTRY_DSN: https://4f1a66f025c60830fec303a094dcdf94@o1120648.ingest.sentry.io/6156573
+---
+# Source: robusta/templates/kubewatch-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: robusta-kubewatch-config
+  namespace: robusta
+data:
+  .kubewatch.yaml: |-
+    handler:
+      cloudevent:
+        url: "http://robusta-runner:80/api/handle"
+    namespace: ""
+    resource:
+      clusterrole: true
+      clusterrolebinding: true
+      configmap: true
+      coreevent: false
+      daemonset: true
+      deployment: true
+      event: true
+      hpa: true
+      ingress: true
+      job: true
+      namespace: true
+      node: true
+      persistentvolume: true
+      pod: true
+      replicaset: true
+      replicationcontroller: false
+      secret: false
+      serviceaccount: true
+      services: true
+      statefulset: true
+---
+# Source: robusta/templates/forwarder-service-account.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: robusta-forwarder-cluster-role
+  namespace : robusta
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - daemonsets
+      - deployments
+      - events
+      - namespaces
+      - nodes
+      - persistentvolumes
+      - pods
+      - replicasets
+      - replicationcontrollers
+      #- secrets
+      - services
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - "networking.k8s.io"
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - "autoscaling"
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - "events.k8s.io"
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - "rbac.authorization.k8s.io"
+    resources:
+      - clusterroles
+      - clusterrolebindings
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - deployments/scale
+      - replicasets
+      - replicasets/scale
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - extensions
+    resources:
+      - daemonsets
+      - deployments
+      - deployments/scale
+      - ingresses
+      - replicasets
+      - replicasets/scale
+      - replicationcontrollers/scale
+    verbs:
+      - get
+      - list
+      - watch
+    
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+---
+# Source: robusta/templates/runner-service-account.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: robusta-runner-cluster-role
+  namespace : robusta
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - daemonsets
+      - deployments
+      - events
+      - namespaces
+      - persistentvolumes
+      - persistentvolumeclaims
+      - pods
+      - pods/status
+      - pods/exec
+      - pods/log
+      - replicasets
+      - replicationcontrollers
+      - services
+      - serviceaccounts
+      - endpoints
+      - secrets
+      
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - persistentvolumes
+      - persistentvolumeclaims
+      - pods
+      - pods/status
+      - pods/exec
+      - pods/log
+      - pods/eviction
+    verbs:
+      - delete
+      - create
+      - patch
+      - update
+
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+
+  - apiGroups:
+      - "apiregistration.k8s.io"
+    resources:
+      - apiservices
+    verbs:
+      - get
+      - list
+
+  - apiGroups:
+      - "rbac.authorization.k8s.io"
+    resources:
+      - clusterroles
+      - clusterrolebindings
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "autoscaling"
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - update
+
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - deployments/scale
+      - replicasets
+      - replicasets/scale
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - create
+      - patch
+      - delete
+
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - statefulsets
+    verbs:
+      - patch
+
+  - apiGroups:
+      - extensions
+    resources:
+      - daemonsets
+      - deployments
+      - deployments/scale
+      - ingresses
+      - replicasets
+      - replicasets/scale
+      - replicationcontrollers/scale
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - delete
+      - create
+
+  - apiGroups:
+      - "events.k8s.io"
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+    - ingresses
+    - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - autoscaling
+    resources:
+    - horizontalpodautoscalers
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - "policy"
+    resources:
+    - poddisruptionbudgets
+    - podsecuritypolicies
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+    - clusterroles
+    - clusterrolebindings
+    - roles
+    - rolebindings
+    verbs:
+      - get
+      - list
+---
+# Source: robusta/templates/forwarder-service-account.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: robusta-forwarder-cluster-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: robusta-forwarder-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: robusta-forwarder-service-account
+    namespace: robusta
+---
+# Source: robusta/templates/runner-service-account.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: robusta-runner-cluster-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: robusta-runner-cluster-role
+subjects:
+  - kind: ServiceAccount
+    name: robusta-runner-service-account
+    namespace: robusta
+---
+# Source: robusta/templates/forwarder.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: robusta-forwarder
+  namespace: robusta
+  labels:
+    app: robusta-forwarder
+spec:
+  selector:
+    app: robusta-forwarder
+  ports:
+    - name: forwarder-metrics
+      protocol: TCP
+      port: 80
+      targetPort: 2112
+---
+# Source: robusta/templates/runner.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: robusta-runner
+  namespace: robusta
+  labels:
+    app: robusta-runner
+    target: robusta-runner
+spec:
+  selector:
+    app: robusta-runner
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 5000
+---
+# Source: robusta/templates/forwarder.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: robusta-forwarder
+  namespace: robusta
+  labels:
+    robusta: forwarder
+spec:
+  selector:
+    matchLabels:
+      app: robusta-forwarder
+  replicas: 1
+  revisionHistoryLimit: 10
+  template:
+    metadata:
+      annotations:
+        checksum/config: ccef035b401896ffb6c28711036c0474d0b52adff77e636b0f8ecc6130795c9d
+      labels:
+        app: robusta-forwarder
+    spec:
+      serviceAccountName: robusta-forwarder-service-account
+      automountServiceAccountToken: true
+      containers:
+      - name: kubewatch
+        # this is a custom version of kubewatch built from https://github.com/aantn/kubewatch
+        image: robustadev/kubewatch:v2.11.0
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: KW_CONFIG
+            value: /config
+          - name: ENABLE_PPROF
+            value: "true"
+        volumeMounts:
+          - name: robusta-kubewatch-config
+            mountPath: /config
+        securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {}
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsUser: 1000
+        resources:
+          requests:
+            cpu: 10m
+            memory: "512Mi"
+          limits:
+            memory: "512Mi"
+            
+      volumes:
+        - name:  robusta-kubewatch-config
+          configMap:
+            name: robusta-kubewatch-config
+---
+# Source: robusta/templates/runner.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: robusta-runner
+  namespace: robusta
+  labels:
+    robusta: runner
+    app: robusta-runner
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: robusta-runner
+  template:
+    metadata:
+      labels:
+        app: robusta-runner
+        robustaComponent: "runner"
+    spec:
+      serviceAccountName: robusta-runner-service-account
+      automountServiceAccountToken: true
+      containers:
+      - name: runner
+        image: quay.io/balki404/sreips-runner:0.0.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {}
+            privileged: false
+            readOnlyRootFilesystem: false
+        env:
+          - name: PLAYBOOKS_CONFIG_FILE_PATH
+            value: /etc/robusta/config/active_playbooks.yaml
+          - name: RELEASE_NAME
+            value: "robusta"
+          - name: PROMETHEUS_ENABLED
+            value: "false"
+          - name: MANAGED_CONFIGURATION_ENABLED
+            value: "false"
+          - name: SEND_ADDITIONAL_TELEMETRY
+            value: "false"
+          - name: LOG_LEVEL
+            value: INFO
+          - name: INSTALLATION_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: RUNNER_VERSION
+            value: 0.28.1
+          - name: CERTIFICATE
+            value: 
+          - name: IMAGE_REGISTRY
+            value: robustadev
+          - name: CLUSTER_DOMAIN
+            value: cluster.local
+          - name: SET_KRR_SECURITY_CONTEXT
+            value: "false"
+        envFrom:
+        - secretRef:
+            name: robusta-runner-secret
+            optional: true
+        volumeMounts:
+          - name: auth-config-secret
+            mountPath: /etc/robusta/auth
+          - name: playbooks-config-secret
+            mountPath: /etc/robusta/config
+        lifecycle:
+          preStop:
+            exec:
+              command: ["bash", "-c", "kill -SIGINT 1"]
+        resources:
+          requests:
+            cpu: 250m
+            memory: "1024Mi"
+          limits:
+            memory: "1024Mi"
+            
+      volumes:
+        - name: playbooks-config-secret
+          secret:
+            secretName: robusta-playbooks-config-secret
+            optional: true
+        - name: auth-config-secret
+          secret:
+            secretName: robusta-auth-config-secret
+            optional: true
