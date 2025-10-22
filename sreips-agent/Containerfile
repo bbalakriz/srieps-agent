@@ -1,0 +1,28 @@
+# Use Red Hat UBI9 Python 3.12 as base image
+FROM registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY sreips-agent.py .
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set user to run the application (non-root)
+USER 1001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# Run the FastAPI application
+CMD ["python", "sreips-agent.py"]
+
