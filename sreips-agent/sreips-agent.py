@@ -11,8 +11,8 @@ import uvicorn
 app = FastAPI(title="SREIPS Agent API")
 
 # Global client and configuration - externalized via environment variables
-LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
-MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "")
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "https://lls-route-llamastack.apps.cluster-5tptd.5tptd.sandbox2399.opentlc.com/")
+MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "https://rh-kcs-mcp-servers.apps.cluster-5tptd.5tptd.sandbox2399.opentlc.com/sse")
 VECTOR_DB_ID = os.getenv("VECTOR_DB_ID", "sreips_vector_id")
 
 # Initialize client globally
@@ -62,7 +62,7 @@ def query_rag_agent(prompt: str) -> str:
     )
 
     session_id = rag_agent.create_session(session_name=f"s{uuid.uuid4().hex}")
-    prompt = "Use the given rag search and find what's the resolution for pod crashloop backoff issues in kubernetes?"
+    # prompt = "Use the given rag search and find what's the resolution for pod crashloop backoff issues in kubernetes?"
 
     response = rag_agent.create_turn(
         messages=[{"role": "user", "content": prompt}],
@@ -94,7 +94,7 @@ def query_mcp_agent(prompt: str) -> str:
     )
 
     session_id = mcp_agent.create_session(session_name=f"s{uuid.uuid4().hex}")
-    prompt = "Find relevant knowledge articles for 'what's the resolution for pod crashloop backoff failures in kubernetes'?"
+    # prompt = "Find relevant knowledge articles for 'what's the resolution for pod crashloop backoff failures in kubernetes'?"
 
     response = mcp_agent.create_turn(
         messages=[{"role": "user", "content": prompt}],
