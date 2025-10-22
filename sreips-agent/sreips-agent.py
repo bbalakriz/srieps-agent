@@ -11,8 +11,8 @@ import uvicorn
 app = FastAPI(title="SREIPS Agent API")
 
 # Global client and configuration - externalized via environment variables
-LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "https://lls-route-llamastack.apps.cluster-5tptd.5tptd.sandbox2399.opentlc.com/")
-MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "https://rh-kcs-mcp-servers.apps.cluster-5tptd.5tptd.sandbox2399.opentlc.com/sse")
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
+MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "")
 VECTOR_DB_ID = os.getenv("VECTOR_DB_ID", "sreips_vector_id")
 
 # Initialize client globally
@@ -56,9 +56,8 @@ def query_rag_agent(prompt: str) -> str:
                 "name": "builtin::rag/knowledge_search",
                 "args": {"vector_db_ids": [VECTOR_DB_ID]},
             }, 
-            "mcp::rh-kcs-mcp",
         ],
-        max_infer_iters=10
+        max_infer_iters=100
     )
 
     session_id = rag_agent.create_session(session_name=f"s{uuid.uuid4().hex}")
@@ -72,6 +71,7 @@ def query_rag_agent(prompt: str) -> str:
 
     rag_output = []
     for log in AgentEventLogger().log(response):
+        log.print()
         if log.role != "inference" and log.role != "tool_execution":
             rag_output.append(log)
 
@@ -104,6 +104,7 @@ def query_mcp_agent(prompt: str) -> str:
 
     mcp_output = []
     for log in AgentEventLogger().log(response):
+        log.print()
         if log.role != "inference" and log.role != "tool_execution":
             mcp_output.append(log)
 
