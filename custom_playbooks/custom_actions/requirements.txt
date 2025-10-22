@@ -1,1 +1,2 @@
 robusta-api~=0.14
+llama_stack==0.2.20

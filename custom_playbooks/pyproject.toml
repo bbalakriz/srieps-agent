@@ -7,6 +7,7 @@ authors = ["bala <bbalakriz@users.noreply.github.com>"]
 [tool.poetry.dependencies]
 # if your playbook requires additional dependencies, add them here
 #some-dependency = "^1.2.3"
+llama_stack==0.2.20
 
 [tool.poetry.dev-dependencies]
 robusta-api = "^0.14"
