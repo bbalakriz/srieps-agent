@@ -42,5 +42,3 @@ spec:
       port: 8321
     distribution:
       name: rh-dev
-    userConfig:
-      configMapName: llama-stack-config

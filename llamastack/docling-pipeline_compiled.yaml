@@ -2,14 +2,14 @@
 # Name: docling-convert-pipeline
 # Description: Converts PDF documents in a git repository to Markdown using Docling and generates embeddings
 # Inputs:
-#    base_url: str [Default: 'https://raw.githubusercontent.com/docling-project/docling/main/tests/data/pdf']
+#    base_url: str [Default: 'https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master']
 #    embed_model_id: str [Default: 'ibm-granite/granite-embedding-125m-english']
 #    max_tokens: int [Default: 512.0]
 #    num_workers: int [Default: 1.0]
-#    pdf_filenames: str [Default: '2203.01017v2.pdf, 2206.01062.pdf, 2305.03393v1-pg9.pdf, amt_handbook_sample.pdf, code_and_formula.pdf, multi_page.pdf, picture_classification.pdf, redp5110_sampled.pdf, right_to_left_01.pdf, right_to_left_02.pdf, right_to_left_03.pdf']
+#    pdf_filenames: str [Default: 'SREIPS-Prod-troubleshooting-Knowledge-Base.pdf']
 #    service_url: str [Default: 'http://lsd-llama-milvus-service:8321']
-#    use_gpu: bool [Default: True]
-#    vector_db_id: str [Default: 'my_demo_vector_id']
+#    use_gpu: bool [Default: False]
+#    vector_db_id: str [Default: 'sreips_vector_id']
 components:
   comp-condition-3:
     dag:
@@ -317,7 +317,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.4'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -340,7 +340,7 @@ deploymentSpec:
           \ == \".pdf\"\n    ]\n\n    print(f\"Found PDFs for processing:\" , all_pdfs)\n\
           \n    splits = [\n        batch for batch in (all_pdfs[i::num_splits] for\
           \ i in range(num_splits)) if batch\n    ]\n    return splits or [[]]\n\n"
-        image: registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168
+        image: quay.io/balki404/docling-pipeline:0.0.1
     exec-docling-convert:
       container:
         args:
@@ -354,9 +354,9 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'docling>=2.43.0'\
-          \ 'transformers' 'sentence-transformers' 'llama-stack' 'llama-stack-client'\
+          \ 'transformers' 'sentence-transformers' 'llama-stack==0.2.20' 'llama-stack-client==0.2.20'\
           \ 'pymilvus' 'fire' 'rapidocr-onnxruntime' 'rapidocr' 'onnxruntime'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.4'\
+          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -380,8 +380,8 @@ deploymentSpec:
           \ AutoTokenizer\n    from sentence_transformers import SentenceTransformer\n\
           \    from docling.chunking import HybridChunker\n    import logging\n  \
           \  from llama_stack_client import LlamaStackClient\n    import uuid\n\n\
-          \    import json\n\n    _log = logging.getLogger(__name__)\n\n    # ----\
-          \ Helper functions ----\n    def setup_chunker_and_embedder(embed_model_id:\
+          \    import json\n\n    _log = logging.getLogger(__name__)\n\n    # Helper\
+          \ functions inside the component\n    def setup_chunker_and_embedder(embed_model_id:\
           \ str, max_tokens: int):\n        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)\n\
           \        embedding_model = SentenceTransformer(embed_model_id)\n       \
           \ chunker = HybridChunker(\n            tokenizer=tokenizer, max_tokens=max_tokens,\
@@ -413,51 +413,51 @@ deploymentSpec:
           Invalid embedding dimension for chunk in {file_name}\")\n              \
           \      continue\n\n                chunk_id = str(uuid.uuid4())\n      \
           \          content_token_count = chunker.tokenizer.count_tokens(raw_chunk)\n\
-          \n                metadata_obj = {\n                    \"file_name\": file_name,\n\
-          \                    \"document_id\": chunk_id,\n                    \"\
-          token_count\": content_token_count,\n                }\n\n             \
-          \   metadata_str = json.dumps(metadata_obj)\n                metadata_token_count\
-          \ = chunker.tokenizer.count_tokens(metadata_str)\n                metadata_obj[\"\
-          metadata_token_count\"] = metadata_token_count\n\n                chunks_with_embedding.append(\n\
-          \                    {\n                        \"content\": raw_chunk,\n\
-          \                        \"mime_type\": \"text/markdown\",\n           \
-          \             \"embedding\": embedding,\n                        \"metadata\"\
-          : metadata_obj,\n                    }\n                )\n\n          \
-          \  # Only insert fully valid chunks\n            valid_chunks = [\n    \
-          \            c for c in chunks_with_embedding\n                if c\n  \
-          \              and isinstance(c.get(\"embedding\"), list)\n            \
-          \    and len(c[\"embedding\"]) == embedding_dim\n                and c.get(\"\
-          content\") and c[\"content\"].strip()\n                and isinstance(c.get(\"\
-          metadata\"), dict)\n            ]\n\n            if not valid_chunks:\n\
-          \                _log.warning(f\"No valid chunks to insert for document\
-          \ {file_name}\")\n                continue\n\n            try:\n       \
-          \         client.vector_io.insert(vector_db_id=vector_db_id, chunks=valid_chunks)\n\
-          \                _log.info(f\"Inserted {len(valid_chunks)} chunks for document\
-          \ {file_name}\")\n            except Exception as e:\n                _log.error(f\"\
-          Failed to insert chunks for document {file_name}: {e}\")\n\n        _log.info(f\"\
-          Processed {processed_docs} documents successfully.\")\n\n    # ---- Main\
-          \ logic ----\n    input_path = pathlib.Path(input_path)\n    output_path\
-          \ = pathlib.Path(output_path)\n    output_path.mkdir(parents=True, exist_ok=True)\n\
-          \n    # Original code using splits\n    # Build absolute paths for the PDFs\n\
-          \    input_pdfs = list(input_path.rglob(\"*.pdf\"))\n\n    # Ensure only\
-          \ valid, non-empty PDFs are kept\n    input_pdfs = [p for p in input_pdfs\
-          \ if p.exists() and p.stat().st_size > 0]\n\n    if not input_pdfs:\n  \
-          \      raise RuntimeError(\"No valid PDFs found in input_path for processing.\"\
-          )\n    # Alternative not using splits\n    # input_pdfs = pathlib.Path(input_path).glob(\"\
-          *.pdf\")\n\n    # Required models are automatically downloaded when they\
-          \ are\n    # not provided in PdfPipelineOptions initialization\n    pipeline_options\
-          \ = PdfPipelineOptions()\n    pipeline_options.do_ocr = True\n    pipeline_options.generate_page_images\
-          \ = True\n    pipeline_options.ocr_options = RapidOcrOptions()\n\n    doc_converter\
-          \ = DocumentConverter(\n        format_options={\n            InputFormat.PDF:\
-          \ PdfFormatOption(pipeline_options=pipeline_options)\n        }\n    )\n\
-          \n    print(\"PDFs for conversion:\")\n    for p in input_pdfs:\n      \
-          \  print(f\" - {p} (exists={p.exists()}, size={p.stat().st_size if p.exists()\
-          \ else 'N/A'})\")\n\n    conv_results = doc_converter.convert_all(\n   \
-          \     input_pdfs,\n        raises_on_error=True,\n    )\n\n    # Initialize\
+          \n                metadata_obj = {\n                    \"chunk_id\": chunk_id,\n\
+          \                    \"document_id\": file_name,\n                    \"\
+          file_name\": file_name,\n                    \"token_count\": content_token_count,\n\
+          \                }\n\n                metadata_str = json.dumps(metadata_obj)\n\
+          \                metadata_token_count = chunker.tokenizer.count_tokens(metadata_str)\n\
+          \                metadata_obj[\"metadata_token_count\"] = metadata_token_count\n\
+          \n                chunks_with_embedding.append(\n                    {\n\
+          \                        \"chunk_metadata\": metadata_obj,\n           \
+          \             \"chunk_id\": chunk_id,\n                        \"content\"\
+          : raw_chunk,\n                        \"mime_type\": \"text/markdown\",\n\
+          \                        \"embedding\": embedding,\n                   \
+          \     \"metadata\": metadata_obj,\n                    }\n             \
+          \   )\n\n            # sanity check...only insert fully valid chunks\n \
+          \           valid_chunks = [\n                c for c in chunks_with_embedding\n\
+          \                if c\n                and isinstance(c.get(\"embedding\"\
+          ), list)\n                and len(c[\"embedding\"]) == embedding_dim\n \
+          \               and c.get(\"content\") and c[\"content\"].strip()\n    \
+          \            and isinstance(c.get(\"metadata\"), dict)\n            ]\n\n\
+          \            if not valid_chunks:\n                _log.warning(f\"No valid\
+          \ chunks to insert for document {file_name}\")\n                continue\n\
+          \n            try:\n                client.vector_io.insert(vector_db_id=vector_db_id,\
+          \ chunks=valid_chunks)\n                _log.info(f\"Inserted {len(valid_chunks)}\
+          \ chunks for document {file_name}\")\n            except Exception as e:\n\
+          \                _log.error(f\"Failed to insert chunks for document {file_name}:\
+          \ {e}\")\n\n        _log.info(f\"Processed {processed_docs} documents successfully.\"\
+          )\n\n    # Main logic starts here\n    input_path = pathlib.Path(input_path)\n\
+          \    output_path = pathlib.Path(output_path)\n    output_path.mkdir(parents=True,\
+          \ exist_ok=True)\n\n    # Build absolute paths for the PDFs\n    input_pdfs\
+          \ = list(input_path.rglob(\"*.pdf\"))\n\n    # Ensure only valid, non-empty\
+          \ PDFs are kept\n    input_pdfs = [p for p in input_pdfs if p.exists() and\
+          \ p.stat().st_size > 0]\n\n    if not input_pdfs:\n        raise RuntimeError(\"\
+          No valid PDFs found in input_path for processing.\")\n\n    # Required models\
+          \ are automatically downloaded when they are\n    # not provided in PdfPipelineOptions\
+          \ initialization\n    pipeline_options = PdfPipelineOptions()\n    pipeline_options.do_ocr\
+          \ = True\n    pipeline_options.generate_page_images = True\n    pipeline_options.ocr_options\
+          \ = RapidOcrOptions()\n\n    doc_converter = DocumentConverter(\n      \
+          \  format_options={\n            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)\n\
+          \        }\n    )\n\n    print(\"PDFs for conversion:\")\n    for p in input_pdfs:\n\
+          \        print(f\" - {p} (exists={p.exists()}, size={p.stat().st_size if\
+          \ p.exists() else 'N/A'})\")\n\n    conv_results = doc_converter.convert_all(\n\
+          \        input_pdfs,\n        raises_on_error=True,\n    )\n\n    # Initialize\
           \ LlamaStack client\n    client = LlamaStackClient(base_url=service_url)\n\
           \n    # Process the conversion results and insert embeddings into the vector\
           \ database\n    process_and_insert_embeddings(conv_results)\n\n"
-        image: quay.io/modh/odh-pipeline-runtime-pytorch-cuda-py311-ubi9@sha256:4706be608af3f33c88700ef6ef6a99e716fc95fc7d2e879502e81c0022fd840e
+        image: quay.io/balki404/docling-pipeline:0.0.1
         resources:
           accelerator:
             count: '1'
@@ -485,9 +485,9 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'docling>=2.43.0'\
-          \ 'transformers' 'sentence-transformers' 'llama-stack' 'llama-stack-client'\
+          \ 'transformers' 'sentence-transformers' 'llama-stack==0.2.20' 'llama-stack-client==0.2.20'\
           \ 'pymilvus' 'fire' 'rapidocr-onnxruntime' 'rapidocr' 'onnxruntime'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.4'\
+          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -511,8 +511,8 @@ deploymentSpec:
           \ AutoTokenizer\n    from sentence_transformers import SentenceTransformer\n\
           \    from docling.chunking import HybridChunker\n    import logging\n  \
           \  from llama_stack_client import LlamaStackClient\n    import uuid\n\n\
-          \    import json\n\n    _log = logging.getLogger(__name__)\n\n    # ----\
-          \ Helper functions ----\n    def setup_chunker_and_embedder(embed_model_id:\
+          \    import json\n\n    _log = logging.getLogger(__name__)\n\n    # Helper\
+          \ functions inside the component\n    def setup_chunker_and_embedder(embed_model_id:\
           \ str, max_tokens: int):\n        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)\n\
           \        embedding_model = SentenceTransformer(embed_model_id)\n       \
           \ chunker = HybridChunker(\n            tokenizer=tokenizer, max_tokens=max_tokens,\
@@ -544,51 +544,51 @@ deploymentSpec:
           Invalid embedding dimension for chunk in {file_name}\")\n              \
           \      continue\n\n                chunk_id = str(uuid.uuid4())\n      \
           \          content_token_count = chunker.tokenizer.count_tokens(raw_chunk)\n\
-          \n                metadata_obj = {\n                    \"file_name\": file_name,\n\
-          \                    \"document_id\": chunk_id,\n                    \"\
-          token_count\": content_token_count,\n                }\n\n             \
-          \   metadata_str = json.dumps(metadata_obj)\n                metadata_token_count\
-          \ = chunker.tokenizer.count_tokens(metadata_str)\n                metadata_obj[\"\
-          metadata_token_count\"] = metadata_token_count\n\n                chunks_with_embedding.append(\n\
-          \                    {\n                        \"content\": raw_chunk,\n\
-          \                        \"mime_type\": \"text/markdown\",\n           \
-          \             \"embedding\": embedding,\n                        \"metadata\"\
-          : metadata_obj,\n                    }\n                )\n\n          \
-          \  # Only insert fully valid chunks\n            valid_chunks = [\n    \
-          \            c for c in chunks_with_embedding\n                if c\n  \
-          \              and isinstance(c.get(\"embedding\"), list)\n            \
-          \    and len(c[\"embedding\"]) == embedding_dim\n                and c.get(\"\
-          content\") and c[\"content\"].strip()\n                and isinstance(c.get(\"\
-          metadata\"), dict)\n            ]\n\n            if not valid_chunks:\n\
-          \                _log.warning(f\"No valid chunks to insert for document\
-          \ {file_name}\")\n                continue\n\n            try:\n       \
-          \         client.vector_io.insert(vector_db_id=vector_db_id, chunks=valid_chunks)\n\
-          \                _log.info(f\"Inserted {len(valid_chunks)} chunks for document\
-          \ {file_name}\")\n            except Exception as e:\n                _log.error(f\"\
-          Failed to insert chunks for document {file_name}: {e}\")\n\n        _log.info(f\"\
-          Processed {processed_docs} documents successfully.\")\n\n    # ---- Main\
-          \ logic ----\n    input_path = pathlib.Path(input_path)\n    output_path\
-          \ = pathlib.Path(output_path)\n    output_path.mkdir(parents=True, exist_ok=True)\n\
-          \n    # Original code using splits\n    # Build absolute paths for the PDFs\n\
-          \    input_pdfs = list(input_path.rglob(\"*.pdf\"))\n\n    # Ensure only\
-          \ valid, non-empty PDFs are kept\n    input_pdfs = [p for p in input_pdfs\
-          \ if p.exists() and p.stat().st_size > 0]\n\n    if not input_pdfs:\n  \
-          \      raise RuntimeError(\"No valid PDFs found in input_path for processing.\"\
-          )\n    # Alternative not using splits\n    # input_pdfs = pathlib.Path(input_path).glob(\"\
-          *.pdf\")\n\n    # Required models are automatically downloaded when they\
-          \ are\n    # not provided in PdfPipelineOptions initialization\n    pipeline_options\
-          \ = PdfPipelineOptions()\n    pipeline_options.do_ocr = True\n    pipeline_options.generate_page_images\
-          \ = True\n    pipeline_options.ocr_options = RapidOcrOptions()\n\n    doc_converter\
-          \ = DocumentConverter(\n        format_options={\n            InputFormat.PDF:\
-          \ PdfFormatOption(pipeline_options=pipeline_options)\n        }\n    )\n\
-          \n    print(\"PDFs for conversion:\")\n    for p in input_pdfs:\n      \
-          \  print(f\" - {p} (exists={p.exists()}, size={p.stat().st_size if p.exists()\
-          \ else 'N/A'})\")\n\n    conv_results = doc_converter.convert_all(\n   \
-          \     input_pdfs,\n        raises_on_error=True,\n    )\n\n    # Initialize\
+          \n                metadata_obj = {\n                    \"chunk_id\": chunk_id,\n\
+          \                    \"document_id\": file_name,\n                    \"\
+          file_name\": file_name,\n                    \"token_count\": content_token_count,\n\
+          \                }\n\n                metadata_str = json.dumps(metadata_obj)\n\
+          \                metadata_token_count = chunker.tokenizer.count_tokens(metadata_str)\n\
+          \                metadata_obj[\"metadata_token_count\"] = metadata_token_count\n\
+          \n                chunks_with_embedding.append(\n                    {\n\
+          \                        \"chunk_metadata\": metadata_obj,\n           \
+          \             \"chunk_id\": chunk_id,\n                        \"content\"\
+          : raw_chunk,\n                        \"mime_type\": \"text/markdown\",\n\
+          \                        \"embedding\": embedding,\n                   \
+          \     \"metadata\": metadata_obj,\n                    }\n             \
+          \   )\n\n            # sanity check...only insert fully valid chunks\n \
+          \           valid_chunks = [\n                c for c in chunks_with_embedding\n\
+          \                if c\n                and isinstance(c.get(\"embedding\"\
+          ), list)\n                and len(c[\"embedding\"]) == embedding_dim\n \
+          \               and c.get(\"content\") and c[\"content\"].strip()\n    \
+          \            and isinstance(c.get(\"metadata\"), dict)\n            ]\n\n\
+          \            if not valid_chunks:\n                _log.warning(f\"No valid\
+          \ chunks to insert for document {file_name}\")\n                continue\n\
+          \n            try:\n                client.vector_io.insert(vector_db_id=vector_db_id,\
+          \ chunks=valid_chunks)\n                _log.info(f\"Inserted {len(valid_chunks)}\
+          \ chunks for document {file_name}\")\n            except Exception as e:\n\
+          \                _log.error(f\"Failed to insert chunks for document {file_name}:\
+          \ {e}\")\n\n        _log.info(f\"Processed {processed_docs} documents successfully.\"\
+          )\n\n    # Main logic starts here\n    input_path = pathlib.Path(input_path)\n\
+          \    output_path = pathlib.Path(output_path)\n    output_path.mkdir(parents=True,\
+          \ exist_ok=True)\n\n    # Build absolute paths for the PDFs\n    input_pdfs\
+          \ = list(input_path.rglob(\"*.pdf\"))\n\n    # Ensure only valid, non-empty\
+          \ PDFs are kept\n    input_pdfs = [p for p in input_pdfs if p.exists() and\
+          \ p.stat().st_size > 0]\n\n    if not input_pdfs:\n        raise RuntimeError(\"\
+          No valid PDFs found in input_path for processing.\")\n\n    # Required models\
+          \ are automatically downloaded when they are\n    # not provided in PdfPipelineOptions\
+          \ initialization\n    pipeline_options = PdfPipelineOptions()\n    pipeline_options.do_ocr\
+          \ = True\n    pipeline_options.generate_page_images = True\n    pipeline_options.ocr_options\
+          \ = RapidOcrOptions()\n\n    doc_converter = DocumentConverter(\n      \
+          \  format_options={\n            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)\n\
+          \        }\n    )\n\n    print(\"PDFs for conversion:\")\n    for p in input_pdfs:\n\
+          \        print(f\" - {p} (exists={p.exists()}, size={p.stat().st_size if\
+          \ p.exists() else 'N/A'})\")\n\n    conv_results = doc_converter.convert_all(\n\
+          \        input_pdfs,\n        raises_on_error=True,\n    )\n\n    # Initialize\
           \ LlamaStack client\n    client = LlamaStackClient(base_url=service_url)\n\
           \n    # Process the conversion results and insert embeddings into the vector\
           \ database\n    process_and_insert_embeddings(conv_results)\n\n"
-        image: quay.io/modh/odh-pipeline-runtime-pytorch-cuda-py311-ubi9@sha256:4706be608af3f33c88700ef6ef6a99e716fc95fc7d2e879502e81c0022fd840e
+        image: quay.io/balki404/docling-pipeline:0.0.1
         resources:
           cpuLimit: 4.0
           cpuRequest: 0.5
@@ -611,7 +611,7 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'requests'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.4'\
+          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -638,7 +638,7 @@ deploymentSpec:
           \ {filename}\")\n        except requests.exceptions.RequestException as\
           \ e:\n            print(f\"Failed to download {filename}: {e}, skipping.\"\
           )\n\n"
-        image: registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168
+        image: quay.io/balki404/docling-pipeline:0.0.1
     exec-register-vector-db:
       container:
         args:
@@ -651,9 +651,9 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'llama-stack-client'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'llama-stack-client==0.2.20'\
           \ 'fire' 'requests'  &&  python3 -m pip install --quiet --no-warn-script-location\
-          \ 'kfp==2.14.4' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          \ 'kfp==2.14.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
           3.9\"' && \"$0\" \"$@\"\n"
         - sh
         - -ec
@@ -676,12 +676,12 @@ deploymentSpec:
           \n        )\n\n    if matching_model.model_type != \"embedding\":\n    \
           \    raise ValueError(f\"Model '{embed_model_id}' is not an embedding model\"\
           )\n\n    embedding_dimension = matching_model.metadata[\"embedding_dimension\"\
-          ]\n\n    # Register the vector DB\n    _ = client.vector_dbs.register(\n\
-          \        vector_db_id=vector_db_id,\n        embedding_model=matching_model.identifier,\n\
-          \        embedding_dimension=embedding_dimension,\n        provider_id=\"\
-          milvus\",\n    )\n    print(\n        f\"Registered vector DB '{vector_db_id}'\
-          \ with embedding model '{embed_model_id}'.\"\n    )\n\n"
-        image: registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168
+          ]\n\n    _ = client.vector_dbs.register(\n        vector_db_id=vector_db_id,\n\
+          \        embedding_model=matching_model.identifier,\n        embedding_dimension=embedding_dimension,\n\
+          \        provider_id=\"milvus\",\n    )\n    print(\n        f\"Registered\
+          \ vector DB '{vector_db_id}' with embedding model '{embed_model_id}'.\"\n\
+          \    )\n\n"
+        image: quay.io/balki404/docling-pipeline:0.0.1
 pipelineInfo:
   description: Converts PDF documents in a git repository to Markdown using Docling
     and generates embeddings
@@ -770,7 +770,7 @@ root:
   inputDefinitions:
     parameters:
       base_url:
-        defaultValue: https://raw.githubusercontent.com/docling-project/docling/main/tests/data/pdf
+        defaultValue: https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master
         description: Base URL to fetch PDF files from
         isOptional: true
         parameterType: STRING
@@ -790,9 +790,7 @@ root:
         isOptional: true
         parameterType: NUMBER_INTEGER
       pdf_filenames:
-        defaultValue: 2203.01017v2.pdf, 2206.01062.pdf, 2305.03393v1-pg9.pdf, amt_handbook_sample.pdf,
-          code_and_formula.pdf, multi_page.pdf, picture_classification.pdf, redp5110_sampled.pdf,
-          right_to_left_01.pdf, right_to_left_02.pdf, right_to_left_03.pdf
+        defaultValue: SREIPS-Prod-troubleshooting-Knowledge-Base.pdf
         description: Comma-separated list of PDF filenames to download and convert
         isOptional: true
         parameterType: STRING
@@ -802,17 +800,17 @@ root:
         isOptional: true
         parameterType: STRING
       use_gpu:
-        defaultValue: true
+        defaultValue: false
         description: Enable GPU in the docling workers
         isOptional: true
         parameterType: BOOLEAN
       vector_db_id:
-        defaultValue: my_demo_vector_id
+        defaultValue: sreips_vector_id
         description: ID of the vector database to store embeddings
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.14.4
+sdkVersion: kfp-2.14.1
 ---
 platforms:
   kubernetes:

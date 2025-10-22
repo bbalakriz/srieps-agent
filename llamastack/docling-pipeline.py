@@ -1,38 +1,20 @@
-# Copyright 2025 IBM, Red Hat
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# ruff: noqa: PLC0415,UP007,UP035,UP006,E712
-# SPDX-License-Identifier: Apache-2.0
 from typing import List
 import logging
 
 from kfp import compiler, dsl
 from kfp.kubernetes import add_node_selector_json, add_toleration_json
 
-PYTHON_BASE_IMAGE = "registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168"
-
-# Workbench Runtime Image: Pytorch with CUDA and Python 3.11 (UBI 9)
-# The images for each release can be found in
-# https://github.com/red-hat-data-services/rhoai-disconnected-install-helper/blob/main/rhoai-2.21.md
+# PYTHON_BASE_IMAGE = "registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168"
+PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.0.1"
 PYTORCH_CUDA_IMAGE = "quay.io/modh/odh-pipeline-runtime-pytorch-cuda-py311-ubi9@sha256:4706be608af3f33c88700ef6ef6a99e716fc95fc7d2e879502e81c0022fd840e"
 
 _log = logging.getLogger(__name__)
 
 
+# This component registers the given vector database in LlamaStack. We will use inbuilt Milvus as the vector DB provider.
 @dsl.component(
     base_image=PYTHON_BASE_IMAGE,
-    packages_to_install=["llama-stack-client", "fire", "requests"],
+    packages_to_install=["llama-stack-client==0.2.20", "fire", "requests"],
 )
 def register_vector_db(
     service_url: str,
@@ -58,7 +40,6 @@ def register_vector_db(
 
     embedding_dimension = matching_model.metadata["embedding_dimension"]
 
-    # Register the vector DB
     _ = client.vector_dbs.register(
         vector_db_id=vector_db_id,
         embedding_model=matching_model.identifier,
@@ -69,7 +50,8 @@ def register_vector_db(
         f"Registered vector DB '{vector_db_id}' with embedding model '{embed_model_id}'."
     )
 
-
+# This component downloads PDF files from a given base URL. We will use the PDFs from my
+# personal GitHub repository which is representative of client's production knowledge base.
 @dsl.component(
     base_image=PYTHON_BASE_IMAGE,
     packages_to_install=["requests"],
@@ -101,7 +83,7 @@ def import_test_pdfs(
         except requests.exceptions.RequestException as e:
             print(f"Failed to download {filename}: {e}, skipping.")
 
-
+# This component creates splits of PDF files for parallel processing
 @dsl.component(
     base_image=PYTHON_BASE_IMAGE,
 )
@@ -129,17 +111,17 @@ def create_pdf_splits(
 
 # This component converts PDFs to Markdown and ingests the embeddings into LlamaStack's vector store
 @dsl.component(
-    base_image=PYTORCH_CUDA_IMAGE,
+    base_image=PYTHON_BASE_IMAGE,
     packages_to_install=[
         "docling>=2.43.0",
         "transformers",
         "sentence-transformers",
-        "llama-stack",
-        "llama-stack-client",
+        "llama-stack==0.2.20",
+        "llama-stack-client==0.2.20",
         "pymilvus",
         "fire",
         "rapidocr-onnxruntime",
-        "rapidocr",        # ensures the import name exists
+        "rapidocr",       
         "onnxruntime",
     ],
 )
@@ -168,7 +150,7 @@ def docling_convert(
 
     _log = logging.getLogger(__name__)
 
-    # ---- Helper functions ----
+    # Helper functions inside the component
     def setup_chunker_and_embedder(embed_model_id: str, max_tokens: int):
         tokenizer = AutoTokenizer.from_pretrained(embed_model_id)
         embedding_model = SentenceTransformer(embed_model_id)
@@ -227,8 +209,9 @@ def docling_convert(
                 content_token_count = chunker.tokenizer.count_tokens(raw_chunk)
 
                 metadata_obj = {
+                    "chunk_id": chunk_id,
+                    "document_id": file_name,
                     "file_name": file_name,
-                    "document_id": chunk_id,
                     "token_count": content_token_count,
                 }
 
@@ -238,6 +221,8 @@ def docling_convert(
 
                 chunks_with_embedding.append(
                     {
+                        "chunk_metadata": metadata_obj,
+                        "chunk_id": chunk_id,
                         "content": raw_chunk,
                         "mime_type": "text/markdown",
                         "embedding": embedding,
@@ -245,7 +230,7 @@ def docling_convert(
                     }
                 )
 
-            # Only insert fully valid chunks
+            # sanity check...only insert fully valid chunks
             valid_chunks = [
                 c for c in chunks_with_embedding
                 if c
@@ -267,12 +252,11 @@ def docling_convert(
 
         _log.info(f"Processed {processed_docs} documents successfully.")
 
-    # ---- Main logic ----
+    # Main logic starts here
     input_path = pathlib.Path(input_path)
     output_path = pathlib.Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Original code using splits
     # Build absolute paths for the PDFs
     input_pdfs = list(input_path.rglob("*.pdf"))
 
@@ -281,8 +265,6 @@ def docling_convert(
 
     if not input_pdfs:
         raise RuntimeError("No valid PDFs found in input_path for processing.")
-    # Alternative not using splits
-    # input_pdfs = pathlib.Path(input_path).glob("*.pdf")
 
     # Required models are automatically downloaded when they are
     # not provided in PdfPipelineOptions initialization
@@ -312,17 +294,18 @@ def docling_convert(
     # Process the conversion results and insert embeddings into the vector database
     process_and_insert_embeddings(conv_results)
 
-
+# The main pipeline definition, making docling conversion and embedding ingestion scalable and configurable
+# disabling GPU by default for broader compatibility
 @dsl.pipeline()
 def docling_convert_pipeline(
-    base_url: str = "https://raw.githubusercontent.com/docling-project/docling/main/tests/data/pdf",
-    pdf_filenames: str = "2203.01017v2.pdf, 2206.01062.pdf, 2305.03393v1-pg9.pdf, amt_handbook_sample.pdf, code_and_formula.pdf, multi_page.pdf, picture_classification.pdf, redp5110_sampled.pdf, right_to_left_01.pdf, right_to_left_02.pdf, right_to_left_03.pdf",
+    base_url: str = "https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master",
+    pdf_filenames: str = "SREIPS-Prod-troubleshooting-Knowledge-Base.pdf",
     num_workers: int = 1,
-    vector_db_id: str = "my_demo_vector_id",
+    vector_db_id: str = "sreips_vector_id",
     service_url: str = "http://lsd-llama-milvus-service:8321",
     embed_model_id: str = "ibm-granite/granite-embedding-125m-english",
     max_tokens: int = 512,
-    use_gpu: bool = True,
+    use_gpu: bool = False,
     # tolerations: Optional[list] = [{"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}],
     # node_selector: Optional[dict] = {},
 ):

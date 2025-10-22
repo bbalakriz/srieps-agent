@@ -11,8 +11,8 @@ import uvicorn
 app = FastAPI(title="SREIPS Agent API")
 
 # Global client and configuration - externalized via environment variables
-LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "https://lls-route-llamastack.apps.cluster-5tptd.5tptd.sandbox2399.opentlc.com/")
-MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "https://rh-kcs-mcp-servers.apps.cluster-5tptd.5tptd.sandbox2399.opentlc.com/sse")
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
+MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "")
 VECTOR_DB_ID = os.getenv("VECTOR_DB_ID", "sreips_vector_id")
 
 # Initialize client globally

@@ -1,50 +1,45 @@
 ---
-# Source: robusta/templates/forwarder-service-account.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: robusta-forwarder-service-account
-  namespace: robusta
+  name: sreips-forwarder-service-account
+  namespace: sreips
 ---
-# Source: robusta/templates/runner-service-account.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: robusta-runner-service-account
-  namespace: robusta
+  name: sreips-runner-service-account
+  namespace: sreips
 ---
-# Source: robusta/templates/playbooks-config.yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: robusta-playbooks-config-secret
-  namespace: robusta
+  name: sreips-playbooks-config-secret
+  namespace: sreips
 type: Opaque
 data:
   active_playbooks.yaml: |-
     ***REMOVED***
 ---
-# Source: robusta/templates/runner.yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: robusta-runner-secret
-  namespace: robusta
+  name: sreips-runner-secret
+  namespace: sreips
 type: Opaque
 stringData:
   SENTRY_DSN: https://4f1a66f025c60830fec303a094dcdf94@o1120648.ingest.sentry.io/6156573
 ---
-# Source: robusta/templates/kubewatch-configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: robusta-kubewatch-config
-  namespace: robusta
+  name: sreips-kubewatch-config
+  namespace: sreips
 data:
   .kubewatch.yaml: |-
     handler:
       cloudevent:
-        url: "http://robusta-runner:80/api/handle"
+        url: "http://sreips-runner:80/api/handle"
     namespace: ""
     resource:
       clusterrole: true
@@ -68,12 +63,11 @@ data:
       services: true
       statefulset: true
 ---
-# Source: robusta/templates/forwarder-service-account.yaml
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: robusta-forwarder-cluster-role
-  namespace : robusta
+  name: sreips-forwarder-cluster-role
+  namespace : sreips
 rules:
   - apiGroups:
       - ""
@@ -172,12 +166,11 @@ rules:
       - list
       - watch
 ---
-# Source: robusta/templates/runner-service-account.yaml
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: robusta-runner-cluster-role
-  namespace : robusta
+  name: sreips-runner-cluster-role
+  namespace : sreips
 rules:
   - apiGroups:
       - ""
@@ -369,81 +362,78 @@ rules:
       - get
       - list
 ---
-# Source: robusta/templates/forwarder-service-account.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: robusta-forwarder-cluster-role-binding
+  name: sreips-forwarder-cluster-role-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: robusta-forwarder-cluster-role
+  name: sreips-forwarder-cluster-role
 subjects:
   - kind: ServiceAccount
-    name: robusta-forwarder-service-account
-    namespace: robusta
+    name: sreips-forwarder-service-account
+    namespace: sreips
 ---
-# Source: robusta/templates/runner-service-account.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: robusta-runner-cluster-role-binding
+  name: sreips-runner-cluster-role-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: robusta-runner-cluster-role
+  name: sreips-runner-cluster-role
 subjects:
   - kind: ServiceAccount
-    name: robusta-runner-service-account
-    namespace: robusta
+    name: sreips-runner-service-account
+    namespace: sreips
 ---
-# Source: robusta/templates/forwarder.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: robusta-forwarder
-  namespace: robusta
+  name: sreips-forwarder
+  namespace: sreips
   labels:
-    app: robusta-forwarder
+    app: sreips-forwarder
 spec:
   selector:
-    app: robusta-forwarder
+    app: sreips-forwarder
   ports:
     - name: forwarder-metrics
       protocol: TCP
       port: 80
       targetPort: 2112
 ---
-# Source: robusta/templates/runner.yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: robusta-runner
-  namespace: robusta
+  name: sreips-runner
+  namespace: sreips
   labels:
-    app: robusta-runner
-    target: robusta-runner
+    app: sreips-runner
+    target: sreips-runner
 spec:
   selector:
-    app: robusta-runner
+    app: sreips-runner
   ports:
     - name: http
       protocol: TCP
       port: 80
       targetPort: 5000
 ---
-# Source: robusta/templates/forwarder.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: robusta-forwarder
-  namespace: robusta
+  name: sreips-forwarder
+  namespace: sreips
   labels:
-    robusta: forwarder
+    sreips: forwarder
+    app: sreips-forwarder
+    target: sreips-forwarder
 spec:
   selector:
     matchLabels:
-      app: robusta-forwarder
+      app: sreips-forwarder
   replicas: 1
   revisionHistoryLimit: 10
   template:
@@ -451,14 +441,14 @@ spec:
       annotations:
         checksum/config: ccef035b401896ffb6c28711036c0474d0b52adff77e636b0f8ecc6130795c9d
       labels:
-        app: robusta-forwarder
+        app: sreips-forwarder
     spec:
-      serviceAccountName: robusta-forwarder-service-account
+      serviceAccountName: sreips-forwarder-service-account
       automountServiceAccountToken: true
       containers:
       - name: kubewatch
         # this is a custom version of kubewatch built from https://github.com/aantn/kubewatch
-        image: robustadev/kubewatch:v2.11.0
+        image: quay.io/balki404/sreips-kubewatch:v2.11.0
         imagePullPolicy: IfNotPresent
         env:
           - name: KW_CONFIG
@@ -466,14 +456,13 @@ spec:
           - name: ENABLE_PPROF
             value: "true"
         volumeMounts:
-          - name: robusta-kubewatch-config
+          - name: sreips-kubewatch-config
             mountPath: /config
         securityContext:
             allowPrivilegeEscalation: false
             capabilities: {}
             privileged: false
             readOnlyRootFilesystem: false
-            runAsUser: 1000
         resources:
           requests:
             cpu: 10m
@@ -482,36 +471,35 @@ spec:
             memory: "512Mi"
             
       volumes:
-        - name:  robusta-kubewatch-config
+        - name:  sreips-kubewatch-config
           configMap:
-            name: robusta-kubewatch-config
+            name: sreips-kubewatch-config
 ---
-# Source: robusta/templates/runner.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: robusta-runner
-  namespace: robusta
+  name: sreips-runner
+  namespace: sreips
   labels:
-    robusta: runner
-    app: robusta-runner
+    sreips: runner
+    app: sreips-runner
 spec:
   replicas: 1
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      app: robusta-runner
+      app: sreips-runner
   template:
     metadata:
       labels:
-        app: robusta-runner
+        app: sreips-runner
         robustaComponent: "runner"
     spec:
-      serviceAccountName: robusta-runner-service-account
+      serviceAccountName: sreips-runner-service-account
       automountServiceAccountToken: true
       containers:
       - name: runner
-        image: quay.io/balki404/sreips-runner:0.0.1
+        image: quay.io/balki404/sreips-runner:0.0.9
         imagePullPolicy: IfNotPresent
         securityContext:
             allowPrivilegeEscalation: false
@@ -547,7 +535,7 @@ spec:
             value: "false"
         envFrom:
         - secretRef:
-            name: robusta-runner-secret
+            name: sreips-runner-secret
             optional: true
         volumeMounts:
           - name: auth-config-secret
@@ -568,7 +556,7 @@ spec:
       volumes:
         - name: playbooks-config-secret
           secret:
-            secretName: robusta-playbooks-config-secret
+            secretName: sreips-playbooks-config-secret
             optional: true
         - name: auth-config-secret
           secret:
