@@ -108,10 +108,25 @@ def query_sreips_agent(query: str) -> dict:
     except Exception as e:
         return {"combined_results": f"Error querying SREIPS Agent: {str(e)}"}
 
+def convert_markdown_to_slack(text: str) -> str:
+    """
+    Convert standard markdown to Slack-compatible markdown
+    - **bold** → *bold* (Slack uses single asterisks for bold)
+    - Keep bullets and numbered lists as-is
+    - Preserve code blocks with backticks
+    """
+    # Convert double asterisks (standard markdown bold) to single asterisks (Slack bold)
+    text = re.sub(r'\*\*([^\*]+)\*\*', r'*\1*', text)
+    
+    # Ensure proper spacing around bullets for better readability
+    text = re.sub(r'^\*\s+', '• ', text, flags=re.MULTILINE)
+    
+    return text
+
 def parse_combined_results(combined_results: str) -> tuple:
     """
     Parse the combined results from SREIPS Agent into RAG and MCP sections
-    Returns (rag_results, mcp_results) tuple
+    Returns (rag_results, mcp_results) tuple, both converted to Slack markdown
     """
     try:
         # Split by section headers
@@ -119,10 +134,16 @@ def parse_combined_results(combined_results: str) -> tuple:
             parts = combined_results.split("=== MCP Results ===")
             rag_part = parts[0].replace("=== RAG Results ===", "").strip()
             mcp_part = parts[1].strip() if len(parts) > 1 else ""
+            
+            # Convert to Slack markdown format
+            rag_part = convert_markdown_to_slack(rag_part)
+            mcp_part = convert_markdown_to_slack(mcp_part)
+            
             return rag_part, mcp_part
         else:
             # If no sections found, return all as RAG results
-            return combined_results, ""
+            converted = convert_markdown_to_slack(combined_results)
+            return converted, ""
     except Exception as e:
         print(f"Error parsing combined results: {e}")
         return combined_results, ""
@@ -166,13 +187,6 @@ def lls_agent_action(event: PodEvent):
     if mcp_results:
         enrichment_blocks.append(
             MarkdownBlock(f"*🔗 Red Hat KCS Articles:*\n{mcp_results}")
-        )
-    
-    # Add pod logs if available
-    if pod_logs:
-        enrichment_blocks.append(DividerBlock())
-        enrichment_blocks.append(
-            FileBlock(f"{pod_name}.log", pod_logs)
         )
     
     # Send enrichment to destinations
