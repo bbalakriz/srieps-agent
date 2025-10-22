@@ -12,6 +12,7 @@ def my_action(event: PodEvent):
 
     # this is how you send data to slack or other destinations
     event.add_enrichment([
+        # CallbackBlock(name="Pod Processes", callback=lambda: pod_processes),
         MarkdownBlock("*Oh no!* An alert occurred on " + pod_name),
         FileBlock("crashing-pod.log", pod_logs)
     ])
