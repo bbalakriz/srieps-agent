@@ -108,6 +108,25 @@ def query_sreips_agent(query: str) -> dict:
     except Exception as e:
         return {"combined_results": f"Error querying SREIPS Agent: {str(e)}"}
 
+def parse_combined_results(combined_results: str) -> tuple:
+    """
+    Parse the combined results from SREIPS Agent into RAG and MCP sections
+    Returns (rag_results, mcp_results) tuple
+    """
+    try:
+        # Split by section headers
+        if "=== RAG Results ===" in combined_results and "=== MCP Results ===" in combined_results:
+            parts = combined_results.split("=== MCP Results ===")
+            rag_part = parts[0].replace("=== RAG Results ===", "").strip()
+            mcp_part = parts[1].strip() if len(parts) > 1 else ""
+            return rag_part, mcp_part
+        else:
+            # If no sections found, return all as RAG results
+            return combined_results, ""
+    except Exception as e:
+        print(f"Error parsing combined results: {e}")
+        return combined_results, ""
+
 @action
 def lls_agent_action(event: PodEvent):
     # we have full access to the pod on which the alert fired
@@ -126,10 +145,35 @@ def lls_agent_action(event: PodEvent):
     results = query_sreips_agent(prompt)
     combined_results = results.get("combined_results", "No results returned from SREIPS Agent")
     
-    # this is how you send data to slack or other destinations
-    event.add_enrichment([
-        MarkdownBlock(f"*Alert:* Pod `{pod_name}` in namespace `{pod_namespace}` is experiencing issues"),
-        MarkdownBlock(f"*Detected Issue:* {failure_reason}"),
-        MarkdownBlock(f"*AI-Powered Resolution:*\n\n{combined_results}"),
-        FileBlock(f"{pod_name}.log", pod_logs)
-    ])
+    # Parse the results into separate sections
+    rag_results, mcp_results = parse_combined_results(combined_results)
+    
+    # Build enrichment blocks
+    enrichment_blocks = [
+        MarkdownBlock(f"*🚨 Alert:* Pod `{pod_name}` in namespace `{pod_namespace}` is experiencing issues"),
+        MarkdownBlock(f"*🔍 Detected Issue:* `{failure_reason}`"),
+        DividerBlock(),
+    ]
+    
+    # Add RAG results if available
+    if rag_results:
+        enrichment_blocks.append(
+            MarkdownBlock(f"*📚 Knowledge Base Resolution:*\n{rag_results}")
+        )
+        enrichment_blocks.append(DividerBlock())
+    
+    # Add MCP results if available
+    if mcp_results:
+        enrichment_blocks.append(
+            MarkdownBlock(f"*🔗 Red Hat KCS Articles:*\n{mcp_results}")
+        )
+    
+    # Add pod logs if available
+    if pod_logs:
+        enrichment_blocks.append(DividerBlock())
+        enrichment_blocks.append(
+            FileBlock(f"{pod_name}.log", pod_logs)
+        )
+    
+    # Send enrichment to destinations
+    event.add_enrichment(enrichment_blocks)
