@@ -83,6 +83,9 @@ def query_rag_agent(prompt: str) -> str:
 
 def query_mcp_agent(prompt: str) -> str:
     """Query the MCP agent with the given prompt"""
+
+    print("Received prompt for MCP agent:", prompt)
+
     mcp_agent = Agent(
         client,
         model=model_id,
@@ -95,6 +98,7 @@ def query_mcp_agent(prompt: str) -> str:
 
     session_id = mcp_agent.create_session(session_name=f"s{uuid.uuid4().hex}")
     # prompt = "Find relevant knowledge articles for 'what's the resolution for pod crashloop backoff failures in kubernetes'?"
+    print("Prompt before calling MCP agent:", prompt)
 
     response = mcp_agent.create_turn(
         messages=[{"role": "user", "content": prompt}],
