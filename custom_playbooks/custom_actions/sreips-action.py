@@ -155,7 +155,14 @@ def lls_agent_action(event: PodEvent):
     pod = event.get_pod()
     pod_name = pod.metadata.name
     pod_namespace = pod.metadata.namespace
-    pod_logs = pod.get_logs()
+    
+    # Try to get logs, but handle cases where container hasn't started yet
+    # (e.g., ImagePullBackOff, ContainerCreating, etc.)
+    try:
+        pod_logs = pod.get_logs()
+    except Exception as e:
+        print(f"Could not fetch logs for pod {pod_name} (container may not be running yet): {e}")
+        pod_logs = ""
     
     # Extract failure reason from pod status and logs
     failure_reason = extract_failure_reason(pod, pod_logs)
