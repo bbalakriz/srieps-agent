@@ -7,21 +7,22 @@ import re
 SREIPS_AGENT_URL = os.getenv("SREIPS_AGENT_URL", "http://sreips-agent.sreips-agent.svc.cluster.local:8000")
 
 # Prompt mapping based on common Kubernetes failure reasons
+# Using concise, search-optimized queries for better agent performance
 PROMPT_MAPPINGS = {
-    "CrashLoopBackOff": "what is the resolution for pod crashloop backoff issues in kubernetes?",
-    "ImagePullBackOff": "what is the resolution for image pull backoff issues in kubernetes?",
-    "ErrImagePull": "what is the resolution for image pull errors in kubernetes?",
-    "CreateContainerConfigError": "what is the resolution for container configuration errors in kubernetes?",
-    "InvalidImageName": "what is the resolution for invalid image name errors in kubernetes?",
-    "CreateContainerError": "what is the resolution for container creation errors in kubernetes?",
-    "RunContainerError": "what is the resolution for run container errors in kubernetes?",
-    "OOMKilled": "what is the resolution for out of memory killed pods in kubernetes?",
-    "Evicted": "what is the resolution for evicted pods in kubernetes?",
-    "FailedScheduling": "what is the resolution for failed pod scheduling in kubernetes?",
-    "NodeNotReady": "what is the resolution for node not ready issues in kubernetes?",
-    "NetworkNotReady": "what is the resolution for network not ready issues in kubernetes?",
-    "PersistentVolumeClaimNotBound": "what is the resolution for PVC not bound issues in kubernetes?",
-    "VolumeAttachFailed": "what is the resolution for volume attachment failures in kubernetes?",
+    "CrashLoopBackOff": "CrashLoopBackOff OpenShift pod",
+    "ImagePullBackOff": "ImagePullBackOff pod OpenShift",
+    "ErrImagePull": "image pull error OpenShift container",
+    "CreateContainerConfigError": "container configuration error OpenShift",
+    "InvalidImageName": "invalid image name OpenShift pod",
+    "CreateContainerError": "container creation error OpenShift",
+    "RunContainerError": "run container error OpenShift pod",
+    "OOMKilled": "OOMKilled pod memory OpenShift",
+    "Evicted": "pod evicted OpenShift cluster",
+    "FailedScheduling": "pod scheduling failure OpenShift",
+    "NodeNotReady": "node not ready OpenShift cluster",
+    "NetworkNotReady": "network not ready OpenShift",
+    "PersistentVolumeClaimNotBound": "PVC not bound OpenShift storage",
+    "VolumeAttachFailed": "volume attachment failure OpenShift",
 }
 
 def extract_failure_reason(pod, pod_logs: str) -> str:

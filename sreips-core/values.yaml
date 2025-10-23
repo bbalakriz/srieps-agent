@@ -21,3 +21,26 @@ customPlaybooks:
           send_finding: true 
           get_response: true
         
+# updated on 23 Oct
+globalConfig:
+  signing_key: xxxx
+  account_id: xxxx
+sinksConfig:
+  - slack_sink:
+      name: main_slack_sink
+      slack_channel: sreips-helper
+      api_key: ${SLACK_API_KEY}          # Slack channel where alerts will be posted
+      disable_holmes_note: true
+disableCloudRouting: true
+runner:
+  sendAdditionalTelemetry: false
+
+openshift:
+  enabled: true
+  createScc: true
+
+globalConfig:
+  prometheus_url: <HOST>
+  alertmanager_url: <HOST>
+
+
