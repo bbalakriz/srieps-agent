@@ -114,7 +114,6 @@ def query_mcp_agent(prompt: str) -> str:
 
 Format each result as:
 Title: [article title]
-ID: [id]
 Link: [full view_uri URL]
 
 Show the complete URL for each article so users can easily access them.""",
