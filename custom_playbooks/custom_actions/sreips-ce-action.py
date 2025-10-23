@@ -79,51 +79,65 @@ def parse_combined_results(combined_results: str) -> tuple:
 
 @action
 def lls_agent_event_action(event: EventChangeEvent):
-    # Get the Kubernetes event
-    k8s_event = event.get_event()
-    
-    # Extract event details
-    event_reason = k8s_event.reason              # e.g., "FailedScheduling"
-    event_message = k8s_event.message            # Detailed error description
-    event_type = k8s_event.type                  # "Warning"
-    
-    # Get involved object details
-    involved_obj = k8s_event.involvedObject
-    resource_kind = involved_obj.kind            # e.g., "Pod"
-    resource_name = involved_obj.name            # e.g., "volume-app"
-    resource_namespace = involved_obj.namespace  # e.g., "sreips-test"
-    
-    # Map event reason to SREIPS prompt
-    # Use existing PROMPT_MAPPINGS or event_reason directly
-    prompt = PROMPT_MAPPINGS.get(event_reason, f"{event_reason} OpenShift")
-    
-    # Query SREIPS Agent (same as before)
-    results = query_sreips_agent(prompt)
-    combined_results = results.get("combined_results", "No results")
-    
-    # Parse and format results (same as before)
-    rag_results, mcp_results = parse_combined_results(combined_results)
-    
-    # Build enrichment with event-specific context
-    enrichment_blocks = [
-        MarkdownBlock(f"*🚨 Kubernetes Event:* {event_reason}"),
-        MarkdownBlock(f"*📦 Resource:* {resource_kind} `{resource_name}` in `{resource_namespace}`"),
-        MarkdownBlock(f"*💬 Message:* {event_message}"),
-        DividerBlock(),
-    ]
-    
-    # Add RAG results if available
-    if rag_results:
-        enrichment_blocks.append(
-            MarkdownBlock(f"*📚 Knowledge Base Resolution:*\n{rag_results}")
-        )
-        enrichment_blocks.append(DividerBlock())
-    
-    # Add MCP results if available
-    if mcp_results:
-        enrichment_blocks.append(
-            MarkdownBlock(f"*🔗 Red Hat KCS Articles:*\n{mcp_results}")
-        )
-    
-    # Send enrichment to destinations
-    event.add_enrichment(enrichment_blocks)
+    try:
+        # Get the Kubernetes event (using documented approach)
+        k8s_event = event.obj
+        
+        # Safely extract event details with defaults
+        event_reason = getattr(k8s_event, 'reason', 'Unknown')
+        event_message = getattr(k8s_event, 'message', 'No message available')
+        event_type = getattr(k8s_event, 'type', 'Warning')
+        
+        # Safely get involved object details
+        involved_obj = getattr(k8s_event, 'involvedObject', None)
+        if involved_obj:
+            resource_kind = getattr(involved_obj, 'kind', 'Unknown')
+            resource_name = getattr(involved_obj, 'name', 'Unknown')
+            # Handle cluster-scoped resources that don't have namespaces
+            resource_namespace = getattr(involved_obj, 'namespace', 'cluster-scoped')
+        else:
+            resource_kind = 'Unknown'
+            resource_name = 'Unknown'
+            resource_namespace = 'Unknown'
+        
+        # Map event reason to SREIPS prompt
+        # Use existing PROMPT_MAPPINGS or construct a generic query
+        prompt = PROMPT_MAPPINGS.get(event_reason, f"{event_reason} OpenShift troubleshooting")
+        
+        # Query SREIPS Agent
+        results = query_sreips_agent(prompt)
+        combined_results = results.get("combined_results", "No results returned from SREIPS Agent")
+        
+        # Parse and format results
+        rag_results, mcp_results = parse_combined_results(combined_results)
+        
+        # Build enrichment with event-specific context
+        enrichment_blocks = [
+            MarkdownBlock(f"*🚨 Kubernetes Event:* `{event_reason}`"),
+            MarkdownBlock(f"*📦 Resource:* {resource_kind} `{resource_name}` in `{resource_namespace}`"),
+            MarkdownBlock(f"*💬 Message:* {event_message}"),
+            DividerBlock(),
+        ]
+        
+        # Add RAG results if available
+        if rag_results:
+            enrichment_blocks.append(
+                MarkdownBlock(f"*📚 Knowledge Base Resolution:*\n{rag_results}")
+            )
+            enrichment_blocks.append(DividerBlock())
+        
+        # Add MCP results if available
+        if mcp_results:
+            enrichment_blocks.append(
+                MarkdownBlock(f"*🔗 Red Hat KCS Articles:*\n{mcp_results}")
+            )
+        
+        # Send enrichment to destinations
+        event.add_enrichment(enrichment_blocks)
+        
+    except AttributeError as e:
+        # Handle missing attributes gracefully
+        print(f"AttributeError in lls_agent_event_action: {e}")        
+    except Exception as e:
+        # Catch any other unexpected errors
+        print(f"Unexpected error in lls_agent_event_action: {e}")
