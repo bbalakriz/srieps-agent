@@ -1,0 +1,108 @@
+---
+# Test Scenario 4: Node NotReady (Platform Issue)
+# This deploys a workload that will be affected when we cordon/drain a node
+# This is a PLATFORM-LEVEL issue, not just a single pod failure
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-test-app
+  namespace: failure-test
+  labels:
+    app: platform-test
+    test-scenario: node-issue
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-test
+  template:
+    metadata:
+      labels:
+        app: platform-test
+    spec:
+      # Toleration allows this app to be scheduled on tainted node
+      tolerations:
+      - key: "sreips-demo"
+        operator: "Equal"
+        value: "node-test"
+        effect: "NoSchedule"
+      
+      # Node affinity ensures pods ONLY go to the tainted node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: "sreips-demo"
+                operator: "In"
+                values:
+                - "node-test"
+      
+      containers:
+      - name: hello
+        image: busybox
+        command: ["sh", "-c", "while true; do echo running; sleep 30; done"]
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        ports:
+        - containerPort: 80
+---
+# ============================================================================
+# Instructions to trigger Node NotReady with Isolated Test Node
+# ============================================================================
+#
+# Create a Dedicated Test Node using MachineSet
+##
+# This approach creates a brand new worker node that is pre-tainted and isolated
+# Advantages:
+# - No impact on existing nodes
+# - Node is created specifically for testing
+# - Easy cleanup (just delete the MachineSet)
+# - More realistic for production scenarios
+#
+# STEP A1: Update the test MachineSet 04-machinset.yaml
+#
+# STEP A2: Review and apply the generated MachineSet
+#    oc apply -f 04-machineset.yaml
+#
+# STEP A3: Wait for the node to be ready (5-10 minutes)
+#    watch 'oc get machines -n openshift-machine-api | grep sreips-test'
+#    
+#    # Once Machine shows "Running", get the node name
+#    NODE_NAME=$(oc get nodes -l sreips-demo=node-test -o jsonpath='{.items[0].metadata.name}')
+#    echo "Test node created: $NODE_NAME"
+#    
+#    # Verify the taint is applied
+#    oc describe node $NODE_NAME | grep -A5 Taints
+#
+# STEP A4: Deploy the test workload (it will schedule only on the new node)
+#    oc apply -f 04-node-issue-workload.yaml
+#    sleep 10
+#    oc get pods -n failure-test -o wide
+#
+# STEP A5: Verify isolation
+#    oc get pods --all-namespaces --field-selector spec.nodeName=$NODE_NAME
+#
+# STEP A6: Trigger the test scenario (cordon and drain)
+#    oc adm cordon $NODE_NAME
+#    oc adm drain $NODE_NAME --ignore-daemonsets --delete-emptydir-data --force
+#
+# STEP A7: Watch the impact
+#    oc get nodes | grep $NODE_NAME
+#    oc get pods -n failure-test -o wide -w
+#
+# STEP A8: Recovery
+#    oc adm uncordon $NODE_NAME
+#
+# STEP A9: Complete cleanup (removes the entire test node)
+#    oc delete -f 04-node-issue-workload.yaml
+#    oc delete machineset sreips-test-worker -n openshift-machine-api
+#    
+#    # Wait for node to be terminated
+#    watch 'oc get machines -n openshift-machine-api | grep sreips-test'
+# ============================================================================

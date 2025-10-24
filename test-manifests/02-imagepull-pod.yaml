@@ -1,0 +1,18 @@
+---
+# Test Scenario 2: ImagePullBackOff
+# This pod references a non-existent image, triggering ImagePullBackOff
+apiVersion: v1
+kind: Pod
+metadata:
+  name: imagepull-app
+  namespace: failure-test
+  labels:
+    app: imagepull-demo
+    test-scenario: imagepull
+spec:
+  containers:
+  - name: app
+    image: registry.example.com/nonexistent/application:v1.0.0
+    # This image doesn't exist, will trigger ImagePullBackOff
+  restartPolicy: Always
+

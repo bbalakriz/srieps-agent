@@ -1,0 +1,24 @@
+---
+# Test Scenario 1: CrashLoopBackOff
+# This pod will crash immediately and repeatedly, triggering CrashLoopBackOff
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: failure-test
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crashloop-app
+  namespace: failure-test
+  labels:
+    app: crashloop-demo
+    test-scenario: crashloop
+spec:
+  containers:
+  - name: app
+    image: busybox:latest
+    command: ["sh", "-c", "echo 'Application starting...'; echo 'Missing required configuration!'; exit 1"]
+    # This will crash immediately, triggering CrashLoopBackOff after several restarts
+  restartPolicy: Always
+

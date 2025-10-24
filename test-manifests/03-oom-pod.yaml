@@ -1,0 +1,32 @@
+---
+# Test Scenario 3: OOMKilled (Out of Memory)
+# This pod will exceed memory limits and get killed by OOM killer
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oom-app
+  namespace: failure-test
+  labels:
+    app: oom-demo
+    test-scenario: oom
+spec:
+  containers:
+  - name: memory-hog
+    image: polinux/stress:latest
+    resources:
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+    command: ["stress"]
+    args: 
+      - "--vm"
+      - "1"
+      - "--vm-bytes"
+      - "128M"  # Allocate 128MB but limit is only 64MB
+      - "--vm-hang"
+      - "1"
+  restartPolicy: Always
+

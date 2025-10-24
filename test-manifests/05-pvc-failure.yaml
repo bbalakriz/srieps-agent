@@ -1,0 +1,41 @@
+---
+# Test Scenario 5: PVC Not Bound / Volume Attachment Failure
+# This creates a PVC with non-existent StorageClass and a pod that can't schedule
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: failing-pvc
+  namespace: failure-test
+  labels:
+    test-scenario: pvc-failure
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nonexistent-storage-class
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-app
+  namespace: failure-test
+  labels:
+    app: volume-demo
+    test-scenario: pvc-failure
+spec:
+  containers:
+  - name: app
+    image: nginx:latest
+    volumeMounts:
+    - name: data
+      mountPath: /data
+    ports:
+    - containerPort: 80
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: failing-pvc
+  restartPolicy: Always
+
