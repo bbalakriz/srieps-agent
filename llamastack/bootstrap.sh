@@ -11,4 +11,5 @@ oc create secret generic llama-stack-inference-model-secret -n llamastack \
   --from-literal VLLM_API_TOKEN="$VLLM_API_TOKEN"
 
 oc apply -f llamastack-distribution.yaml -n llamastack
+oc apply -f all-in-one.yaml -n llamastack
 
