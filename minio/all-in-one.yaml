@@ -159,3 +159,30 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-create
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          env:
+            - name: MC_CONFIG_DIR
+              value: /tmp/mc
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mkdir -p /tmp/mc
+              echo "Waiting for MinIO to be ready..."
+              until mc alias set myminio http://minio-service:9000 minio ***REMOVED***; do
+                sleep 2
+              done
+              echo "Creating bucket..."
+              mc mb myminio/pipelines || true

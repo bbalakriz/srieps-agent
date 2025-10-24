@@ -7,12 +7,13 @@ import re
 SREIPS_AGENT_URL = os.getenv("SREIPS_AGENT_URL", "http://sreips-agent.sreips-agent.svc.cluster.local:8000")
 
 # Prompt mapping based on common Kubernetes failure reasons
-# Using concise, search-optimized queries for better agent performance
+# Using concise, search-optimized queries else LLama4 Scout 17B produce inconsistent tool execution behavior
+
 PROMPT_MAPPINGS = {
     "FailedScheduling": "pod scheduling failure OpenShift",
-    "PersistentVolumeClaimNotBound": "PVC not bound OpenShift storage",
+    "PersistentVolumeClaimNotBound": "PVC not bound OpenShift",
     "VolumeAttachFailed": "volume attachment failure OpenShift",
-    "ProvisioningFailed": "PVC provisioning failed OpenShift storage",
+    "ProvisioningFailed": "failed pvc provisioning openShift",
     "FailedMount": "volume mount failure OpenShift",
     "FailedAttachVolume": "volume attachment failure OpenShift"
 }
