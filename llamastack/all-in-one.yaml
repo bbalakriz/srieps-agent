@@ -6,7 +6,6 @@ metadata:
   name: lsd-llama-milvus-service
   namespace: llamastack
 spec:
-  host: lsd-llama-milvus-service-llamastack.apps.cluster-2r85j.2r85j.sandbox1882.opentlc.com
   path: /
   port:
     targetPort: http
@@ -17,3 +16,63 @@ spec:
     name: lsd-llama-milvus-service
     weight: 100
   wildcardPolicy: None
+---
+apiVersion: datasciencepipelinesapplications.opendatahub.io/v1
+kind: DataSciencePipelinesApplication
+metadata:
+  name: dspa
+  namespace: llamastack
+spec:
+  apiServer:
+    artifactSignedURLExpirySeconds: 60
+    caBundleFileMountPath: ""
+    caBundleFileName: ""
+    cacheEnabled: true
+    deploy: true
+    enableOauth: true
+    enableSamplePipeline: false
+    managedPipelines:
+      instructLab:
+        state: Removed
+    pipelineStore: database
+  database:
+    disableHealthCheck: false
+    mariaDB:
+      deploy: true
+      pipelineDBName: mlpipeline
+      pvcSize: 10Gi
+      username: mlpipeline
+  dspVersion: v2
+  objectStorage:
+    disableHealthCheck: false
+    enableExternalRoute: false
+    externalStorage:
+      basePath: ""
+      bucket: pipelines
+      host: minio-service.minio.svc.cluster.local:9000
+      port: ""
+      region: none
+      s3CredentialsSecret:
+        accessKey: AWS_ACCESS_KEY_ID
+        secretKey: AWS_SECRET_ACCESS_KEY
+        secretName: dashboard-dspa-secret
+      scheme: http
+  persistenceAgent:
+    deploy: true
+    numWorkers: 2
+  podToPodTLS: true
+  scheduledWorkflow:
+    cronScheduleTimezone: UTC
+    deploy: true
+---
+apiVersion: v1
+data:
+  AWS_ACCESS_KEY_ID: bWluaW8=
+  AWS_SECRET_ACCESS_KEY: bWluaW8xMjM=
+kind: Secret
+metadata:
+  labels:
+    opendatahub.io/dashboard: "true"
+  name: dashboard-dspa-secret
+  namespace: llamastack
+type: Opaque
