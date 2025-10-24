@@ -1,0 +1,21 @@
+globalConfig:
+  clusterName: "openshift-prod"
+  signing_key: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  account_id: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+sinksConfig:
+  - slack_sink:
+      name: main_slack_sink
+      slack_channel: sreips-helper
+      api_key: ${SLACK_API_KEY}          # Slack channel where alerts will be posted
+      disable_holmes_note: true
+disableCloudRouting: true
+runner:
+  sendAdditionalTelemetry: false
+
+openshift:
+  enabled: true
+  createScc: true
+
+globalConfig:
+  prometheus_url: https://xxxxxxxxxxxx
+  alertmanager_url: https://xxxxxxxxxxxx
