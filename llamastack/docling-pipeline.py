@@ -205,7 +205,11 @@ def docling_convert(
                     _log.warning(f"Invalid embedding dimension for chunk in {file_name}")
                     continue
 
-                chunk_id = str(uuid.uuid4())
+                # chunk_id = str(uuid.uuid4()) --> may result in duplicates if same file/chunk is reinserted as part of cronjob
+                # derive chunk_id from the document + chunk text hash to make it duplicate-proof
+                import hashlib
+                chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()
+                
                 content_token_count = chunker.tokenizer.count_tokens(raw_chunk)
 
                 metadata_obj = {
