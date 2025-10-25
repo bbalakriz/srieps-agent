@@ -191,6 +191,9 @@ def lls_agent_action(event: PodEvent):
     enrichment_blocks = [
         MarkdownBlock(f"*🚨 Alert:* Pod `{pod_name}` in namespace `{pod_namespace}` is experiencing issues"),
         MarkdownBlock(f"*🔍 Detected Issue:* `{failure_reason}`"),
+        # Only add the pod logs file if logs are available
+        FileBlock("pod-logs.log", pod_logs) if pod_logs not in (None, "") else None,
+
         DividerBlock(),
     ]
     

@@ -130,3 +130,7 @@ If installation fails:
 3. Check pod status: `oc get pods -n <namespace>`
 4. View pod logs: `oc logs -n <namespace> <pod-name>`
 5. The script will provide detailed error messages indicating where the failure occurred
+
+## Using SREIPS
+
+To test SREIPS event detection and notification, apply the sample manifests in `./test-manifests`. These manifests will generate simulated issues or failures. SREIPS will detect the resulting events, send detailed notifications to your configured Slack channel and include enriched solutions based on data from your enterprise knowledge base and Red Hat KCS.

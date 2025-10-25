@@ -483,6 +483,20 @@ install_llamastack() {
     RECURRING_RUN_ID=$(echo "$RECURRING_RUN_RESPONSE" | jq -r '.recurring_run_id')
     log_success "Recurring run created with ID: $RECURRING_RUN_ID"
     
+    log_info "Triggering initial ingestion run immediately..."
+    INITIAL_RUN_RESPONSE=$(curl -s -X POST "https://${DS_PIPELINE_ROUTE}/apis/v2beta1/runs" \
+        -H "Authorization: Bearer ${OC_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"pipeline_version_reference\": {
+                \"pipeline_id\": \"${PIPELINE_ID}\"
+            },
+            \"display_name\": \"initial-ingestion-run\"
+        }")
+    
+    INITIAL_RUN_ID=$(echo "$INITIAL_RUN_RESPONSE" | jq -r '.run_id')
+    log_success "Initial ingestion run triggered with ID: $INITIAL_RUN_ID"
+    
     log_success "LlamaStack installation completed"
 }
 
