@@ -411,8 +411,12 @@ deploymentSpec:
           \ {e}\")\n                    continue\n\n                if not isinstance(embedding,\
           \ list) or len(embedding) != embedding_dim:\n                    _log.warning(f\"\
           Invalid embedding dimension for chunk in {file_name}\")\n              \
-          \      continue\n\n                chunk_id = str(uuid.uuid4())\n      \
-          \          content_token_count = chunker.tokenizer.count_tokens(raw_chunk)\n\
+          \      continue\n\n                # chunk_id = str(uuid.uuid4()) --> may\
+          \ result in duplicates if same file/chunk is reinserted as part of cronjob\n\
+          \                # derive chunk_id from the document + chunk text hash to\
+          \ make it duplicate-proof\n                import hashlib\n            \
+          \    chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()\n\
+          \n                content_token_count = chunker.tokenizer.count_tokens(raw_chunk)\n\
           \n                metadata_obj = {\n                    \"chunk_id\": chunk_id,\n\
           \                    \"document_id\": file_name,\n                    \"\
           file_name\": file_name,\n                    \"token_count\": content_token_count,\n\
@@ -542,8 +546,12 @@ deploymentSpec:
           \ {e}\")\n                    continue\n\n                if not isinstance(embedding,\
           \ list) or len(embedding) != embedding_dim:\n                    _log.warning(f\"\
           Invalid embedding dimension for chunk in {file_name}\")\n              \
-          \      continue\n\n                chunk_id = str(uuid.uuid4())\n      \
-          \          content_token_count = chunker.tokenizer.count_tokens(raw_chunk)\n\
+          \      continue\n\n                # chunk_id = str(uuid.uuid4()) --> may\
+          \ result in duplicates if same file/chunk is reinserted as part of cronjob\n\
+          \                # derive chunk_id from the document + chunk text hash to\
+          \ make it duplicate-proof\n                import hashlib\n            \
+          \    chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()\n\
+          \n                content_token_count = chunker.tokenizer.count_tokens(raw_chunk)\n\
           \n                metadata_obj = {\n                    \"chunk_id\": chunk_id,\n\
           \                    \"document_id\": file_name,\n                    \"\
           file_name\": file_name,\n                    \"token_count\": content_token_count,\n\

@@ -11,8 +11,8 @@ import uvicorn
 app = FastAPI(title="SREIPS Agent API")
 
 # Global client and configuration - externalized via environment variables
-LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "https://lsd-llama-milvus-service-llamastack.apps.cluster-2r85j.2r85j.sandbox1882.opentlc.com/")
-MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "https://rh-kcs-mcp-servers.apps.cluster-2r85j.2r85j.sandbox1882.opentlc.com/sse")
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
+MCP_ENDPOINT = os.getenv("MCP_ENDPOINT", "")
 VECTOR_DB_ID = os.getenv("VECTOR_DB_ID", "sreips_vector_id")
 
 # Initialize client globally
@@ -72,8 +72,7 @@ def query_rag_agent(prompt: str) -> str:
     )
 
     session_id = rag_agent.create_session(session_name=f"s{uuid.uuid4().hex}")
-    # prompt = "Use the given rag search and find what's the resolution for pod crashloop backoff issues in kubernetes?"
-
+    
     response = rag_agent.create_turn(
         messages=[{"role": "user", "content": prompt}],
         session_id=session_id,

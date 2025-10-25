@@ -174,6 +174,16 @@ spec:
           env:
             - name: MC_CONFIG_DIR
               value: /tmp/mc
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: minio_root_user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: minio_root_password
           command:
             - /bin/sh
             - -c
@@ -181,7 +191,7 @@ spec:
               set -e
               mkdir -p /tmp/mc
               echo "Waiting for MinIO to be ready..."
-              until mc alias set myminio http://minio-service:9000 minio ***REMOVED***; do
+              until mc alias set myminio http://minio-service:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
                 sleep 2
               done
               echo "Creating bucket..."
