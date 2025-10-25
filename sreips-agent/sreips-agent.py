@@ -36,6 +36,13 @@ def initialize_client():
         print(f"Initialized with model: {model_id}")
         
         # Check if model is suitable for tool calling
+        # *********************************************************************
+        # WARNING: Using smaller models like Llama4-Scout-17B or similar WILL
+        # result in UNPREDICTABLE TOOL EXECUTION BEHAVIOR and AGENT FAILURES.
+        # For consistent and robust agentic functionalities (tool calls, sequences),
+        # it is strongly recommended to use larger models such as Llama-3.1-70B
+        # or any specialized models explicitly trained for tool usage.
+        # *********************************************************************
         if "17B" in model_id or "Scout" in model_id:
             print("⚠️  WARNING: Smaller models (17B) may have inconsistent tool execution behavior.")
             print("    For production, consider using Llama-3.1-70B or larger models trained for tool use.")

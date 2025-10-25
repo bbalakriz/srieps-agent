@@ -7,7 +7,16 @@ import re
 SREIPS_AGENT_URL = os.getenv("SREIPS_AGENT_URL", "http://sreips-agent.sreips-agent.svc.cluster.local:8000")
 
 # Prompt mapping based on common Kubernetes failure reasons
-# Using concise, search-optimized queries else LLama4 Scout 17B produce inconsistent tool execution behavior
+# ********************************************************************************************
+# WARNING: The below mapping of Kubernetes failure reasons to short search-optimized prompts
+# is REQUIRED **ONLY** because Llama4-Scout-17B (or other compact/lite models) struggles with
+# tool invocation and reasoning if you use more natural, verbose language.
+# 
+# If you use larger, more sophisticated models (e.g., Llama-3.1-70B or similar), you DO NOT
+# need this brittle mapping; the agent will understand direct, full prompts naturally.
+#
+# THIS MAPPING IS A WORKAROUND FOR Llama4-Scout-17B/LiteMass limitations!
+# ********************************************************************************************
 
 PROMPT_MAPPINGS = {
     "FailedScheduling": "pod scheduling failure OpenShift",

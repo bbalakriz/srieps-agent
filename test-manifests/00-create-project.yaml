@@ -1,0 +1,6 @@
+# This manifest creates the test project/namespace for failure scenarios
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: failure-test

@@ -2,11 +2,6 @@
 # Test Scenario 1: CrashLoopBackOff
 # This pod will crash immediately and repeatedly, triggering CrashLoopBackOff
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: failure-test
----
-apiVersion: v1
 kind: Pod
 metadata:
   name: crashloop-app
