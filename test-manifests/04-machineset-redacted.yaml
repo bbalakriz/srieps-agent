@@ -1,0 +1,112 @@
+# This is a template MachineSet for creating a test worker node in AWS
+# Replace all placeholder values (xxxxx, yyyyy, etc.) with your actual cluster-specific values
+# Most values can be obtained from existing MachineSets: oc get machineset -n openshift-machine-api -o yaml
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  name: sreips-test-worker
+  namespace: openshift-machine-api
+  labels:
+    # Replace cluster-xxxxx-yyyyy with your cluster's infrastructure ID
+    # Get it with: oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}'
+    machine.openshift.io/cluster-api-cluster: cluster-xxxxx-yyyyy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # Use the same infrastructure ID from above
+      machine.openshift.io/cluster-api-cluster: cluster-xxxxx-yyyyy
+      machine.openshift.io/cluster-api-machineset: sreips-test-worker
+  template:
+    metadata:
+      labels:
+        # Use the same infrastructure ID from above
+        machine.openshift.io/cluster-api-cluster: cluster-xxxxx-yyyyy
+        machine.openshift.io/cluster-api-machine-role: worker
+        machine.openshift.io/cluster-api-machine-type: worker
+        machine.openshift.io/cluster-api-machineset: sreips-test-worker
+    spec:
+      metadata:
+        labels:
+          node-role.kubernetes.io/worker: ""
+          sreips-demo: "node-test"
+      taints:
+        - key: sreips-demo
+          value: node-test
+          effect: NoSchedule
+      providerSpec:
+        value:
+          userDataSecret:
+            name: worker-user-data
+          placement:
+            # Replace with your desired AWS availability zone
+            # List zones with: aws ec2 describe-availability-zones --region <your-region>
+            availabilityZone: us-east-1a
+            # Replace with your cluster's AWS region
+            # Get it with: oc get infrastructure cluster -o jsonpath='{.status.platformStatus.aws.region}'
+            region: us-east-1
+          credentialsSecret:
+            name: aws-cloud-credentials
+          capacityReservationId: ''
+          instanceType: m6a.2xlarge
+          metadata:
+            creationTimestamp: null
+          blockDevices:
+            - ebs:
+                encrypted: true
+                iops: 0
+                kmsKey:
+                  arn: ''
+                volumeSize: 100
+                volumeType: gp2
+          securityGroups:
+            # Replace with your cluster's infrastructure ID in the security group names
+            # Get security groups with: oc get machineset -n openshift-machine-api -o yaml | grep -A5 securityGroups
+            - filters:
+                - name: 'tag:Name'
+                  values:
+                    - cluster-xxxxx-yyyyy-node
+            - filters:
+                - name: 'tag:Name'
+                  values:
+                    - cluster-xxxxx-yyyyy-lb
+          kind: AWSMachineProviderConfig
+          metadataServiceOptions: {}
+          tags:
+            # Replace cluster-xxxxx-yyyyy with your cluster's infrastructure ID
+            - name: kubernetes.io/cluster/cluster-xxxxx-yyyyy
+              value: owned
+            # Replace with your cluster's stack name (optional, environment-specific)
+            - name: Stack
+              value: ocp4-cluster-xxxxx
+            - name: env_type
+              value: ocp4-cluster
+            # Replace with your cluster's GUID (optional, environment-specific)
+            - name: guid
+              value: xxxxx
+            - name: owner
+              value: unknown
+            - name: platform
+              value: rhpds
+            # Replace with a unique UUID if needed (optional, environment-specific)
+            - name: uuid
+              value: 00000000-0000-0000-0000-000000000000
+          deviceIndex: 0
+          ami:
+            # Replace with the correct RHCOS AMI ID for your region
+            # Get AMI from: oc get machineset -n openshift-machine-api -o yaml | grep -A1 "ami:"
+            # Or find RHCOS AMIs at: https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-customizations.html
+            id: ami-xxxxxxxxxxxxxxxxx
+          subnet:
+            # Replace with your cluster's infrastructure ID and availability zone in the subnet name
+            # Get subnet info with: oc get machineset -n openshift-machine-api -o yaml | grep -A5 subnet
+            filters:
+              - name: 'tag:Name'
+                values:
+                  - cluster-xxxxx-yyyyy-subnet-private-us-east-1a
+          apiVersion: machine.openshift.io/v1beta1
+          iamInstanceProfile:
+            # Replace with your cluster's infrastructure ID in the IAM instance profile name
+            # Get IAM profile with: oc get machineset -n openshift-machine-api -o yaml | grep -A1 iamInstanceProfile
+            id: cluster-xxxxx-yyyyy-worker-profile
+
