@@ -11,15 +11,8 @@ spec:
       storage: 20Gi
   volumeMode: Filesystem
 ---
-kind: Secret
-apiVersion: v1
-metadata:
-  name: minio-secret
-stringData:
-  # change the username and password to your own values.
-  # ensure that the user is at least 3 characters long and the password at least 8
-  minio_root_user: minio
-  minio_root_password: REMOVED
+# NOTE: The minio-secret is created by bootstrap.sh using credentials from config.env
+# Do not create the secret here as it would cause a race condition with the Job
 ---
 kind: Deployment
 apiVersion: apps/v1

@@ -312,18 +312,17 @@ install_minio() {
     log_info "Creating minio namespace..."
     oc new-project minio || oc project minio
     
-    log_info "Applying MinIO manifests..."
-    oc apply -f all-in-one.yaml -n minio
-    
-    log_info "Patching minio-secret with credentials from config.env..."
+    log_info "Creating minio-secret with credentials from config.env..."
     oc create secret generic minio-secret \
         --from-literal=minio_root_user="$MINIO_ROOT_USER" \
         --from-literal=minio_root_password="$MINIO_ROOT_PASSWORD" \
         -n minio \
         --dry-run=client -o yaml | oc apply -f -
     
-    log_info "Restarting MinIO deployment to pick up new credentials..."
-    oc rollout restart deployment/minio -n minio
+    log_info "Applying MinIO manifests..."
+    oc apply -f all-in-one.yaml -n minio
+    
+    log_info "Waiting for MinIO deployment to be ready..."
     oc rollout status deployment/minio -n minio --timeout=300s
     
     log_info "Waiting for MinIO pod to be ready..."
