@@ -115,9 +115,9 @@ spec:
     spec:
       containers:
       - name: remediation-agent
-        image: quay.io/balki404/remediation-agent:2nov-0
+        image: quay.io/balki404/remediation-agent:0.0.6
         imagePullPolicy: IfNotPresent
-        command: ["python", "sreips-remediation-agent.py"]
+        command: ["python", "remediation-agent.py"]
         ports:
         - containerPort: 8080
           name: http
