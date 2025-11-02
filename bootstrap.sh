@@ -6,9 +6,10 @@
 # This script orchestrates the installation of all SREIPS components in sequence:
 # 1. sreips-core
 # 2. minio
-# 3. rh-kcs-mcp
-# 4. llamastack
-# 5. sreips-agent
+# 3. ocp-mcp
+# 4. rh-kcs-mcp
+# 5. llamastack
+# 6. sreips-agent (including remediation-agent)
 #
 # Prerequisites:
 # - OpenShift CLI (oc) installed and logged in
@@ -346,8 +347,30 @@ install_minio() {
     log_success "MinIO installation completed"
 }
 
+install_ocp_mcp() {
+    log_step "4: Installing OpenShift MCP Server"
+    
+    cd "${SCRIPT_DIR}/ocp-mcp" || exit 1
+    
+    log_info "Creating mcp-servers namespace (if not exists)..."
+    oc new-project mcp-servers 2>/dev/null || oc project mcp-servers
+    
+    log_info "Applying OCP MCP manifests..."
+    oc apply -f all-in-one.yaml -n mcp-servers
+    
+    log_info "Waiting for OCP MCP server pod to be ready..."
+    wait_for_pod "mcp-servers" "app=ocp-mcp-server" 300
+    
+    log_info "Capturing OCP MCP endpoint..."
+    OCP_MCP_SERVICE=$(oc get svc ocp-mcp-server -n mcp-servers -o jsonpath='{.spec.clusterIP}')
+    export OCP_MCP_ENDPOINT="http://${OCP_MCP_SERVICE}:8000/sse"
+    log_success "OCP MCP Endpoint: $OCP_MCP_ENDPOINT"
+    
+    log_success "OpenShift MCP Server installation completed"
+}
+
 install_rh_kcs_mcp() {
-    log_step "4: Installing Red Hat KCS MCP Server"
+    log_step "5: Installing Red Hat KCS MCP Server"
     
     cd "${SCRIPT_DIR}/rh-kcs-mcp" || exit 1
     
@@ -379,7 +402,7 @@ install_rh_kcs_mcp() {
 }
 
 install_llamastack() {
-    log_step "5: Installing LlamaStack"
+    log_step "6: Installing LlamaStack"
     
     cd "${SCRIPT_DIR}/llamastack" || exit 1
     
@@ -500,14 +523,14 @@ install_llamastack() {
 }
 
 install_sreips_agent() {
-    log_step "6: Installing SREIPS Agent"
+    log_step "7: Installing SREIPS Agent and Remediation Agent"
     
     cd "${SCRIPT_DIR}/sreips-agent" || exit 1
     
     log_info "Creating sreips-agent namespace..."
     oc new-project sreips-agent || oc project sreips-agent
     
-    log_info "Applying SREIPS Agent manifests..."
+    log_info "Applying SREIPS Agent manifests (includes remediation agent)..."
     oc apply -f all-in-one.yaml -n sreips-agent
     
     log_info "Patching sreips-agent-config ConfigMap with captured URLs and config.env values..."
@@ -518,19 +541,38 @@ install_sreips_agent() {
         -n sreips-agent \
         --dry-run=client -o yaml | oc apply -f -
     
+    log_info "Patching remediation-agent-config ConfigMap with captured URLs..."
+    oc create configmap remediation-agent-config \
+        --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_URL" \
+        --from-literal=OCP_MCP_ENDPOINT="$OCP_MCP_ENDPOINT" \
+        -n sreips-agent \
+        --dry-run=client -o yaml | oc apply -f -
+    
     log_info "Restarting SREIPS Agent deployment to pick up new configuration..."
     oc rollout restart deployment/sreips-agent -n sreips-agent
     oc rollout status deployment/sreips-agent -n sreips-agent --timeout=300s
     
+    log_info "Restarting Remediation Agent deployment to pick up new configuration..."
+    oc rollout restart deployment/remediation-agent -n sreips-agent
+    oc rollout status deployment/remediation-agent -n sreips-agent --timeout=300s
+    
     log_info "Waiting for SREIPS Agent pod to be ready..."
     wait_for_pod "sreips-agent" "app=sreips-agent" 300
+    
+    log_info "Waiting for Remediation Agent pod to be ready..."
+    wait_for_pod "sreips-agent" "app=remediation-agent" 300
     
     log_info "Capturing SREIPS Agent route..."
     SREIPS_AGENT_ROUTE=$(oc get route sreips-agent -n sreips-agent -o jsonpath='{.spec.host}')
     export SREIPS_AGENT_URL="https://${SREIPS_AGENT_ROUTE}"
     log_success "SREIPS Agent URL: $SREIPS_AGENT_URL"
     
-    log_success "SREIPS Agent installation completed"
+    log_info "Capturing Remediation Agent route..."
+    REMEDIATION_AGENT_ROUTE=$(oc get route remediation-agent -n sreips-agent -o jsonpath='{.spec.host}')
+    export REMEDIATION_AGENT_URL="https://${REMEDIATION_AGENT_ROUTE}"
+    log_success "Remediation Agent URL: $REMEDIATION_AGENT_URL"
+    
+    log_success "SREIPS Agent and Remediation Agent installation completed"
 }
 
 # ==============================================================================
@@ -540,7 +582,7 @@ install_sreips_agent() {
 main() {
     log_step "SREIPS Master Bootstrap Script"
     log_info "Starting installation of all SREIPS components..."
-    log_info "This process will install: sreips-core, minio, rh-kcs-mcp, llamastack, sreips-agent"
+    log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, llamastack, sreips-agent, remediation-agent"
     
     # Check prerequisites
     check_prerequisites
@@ -548,6 +590,7 @@ main() {
     # Install components in sequence
     install_sreips_core
     install_minio
+    install_ocp_mcp
     install_rh_kcs_mcp
     install_llamastack
     install_sreips_agent
@@ -558,8 +601,10 @@ main() {
     echo ""
     log_info "Component URLs:"
     log_info "  - SREIPS Agent: $SREIPS_AGENT_URL"
+    log_info "  - Remediation Agent: $REMEDIATION_AGENT_URL"
     log_info "  - LlamaStack: $LLAMA_STACK_URL"
-    log_info "  - MCP Server: $MCP_ENDPOINT"
+    log_info "  - RH KCS MCP Server: $MCP_ENDPOINT"
+    log_info "  - OCP MCP Server: $OCP_MCP_ENDPOINT"
     echo ""
     log_info "You can now test the SREIPS agent with:"
     echo "  curl -X POST $SREIPS_AGENT_URL/query \\"
