@@ -222,19 +222,21 @@ def lls_agent_quota_action(event: EventChangeEvent):
         print(f"Unexpected error in lls_agent_quota_action: {e}")
 
 @action
-def remediate_quota_issue(event: EventChangeEvent, params: dict):
+def remediate_quota_issue(
+    event: EventChangeEvent,
+    namespace: str = "unknown",
+    resource_kind: str = "unknown",
+    resource_name: str = "unknown",
+    event_reason: str = "unknown",
+    quota_resource_type: str = "unknown",
+    quota_requested: str = "unknown",
+    quota_limit: str = "unknown"
+):
     """
     Callback action triggered when user clicks the remediation button
     Sends remediation request to SREIPS remediation service
     """
     try:
-        namespace = params.get("namespace", "unknown")
-        resource_kind = params.get("resource_kind", "unknown")
-        resource_name = params.get("resource_name", "unknown")
-        event_reason = params.get("event_reason", "unknown")
-        quota_resource_type = params.get("quota_resource_type", "unknown")
-        quota_requested = params.get("quota_requested", "unknown")
-        quota_limit = params.get("quota_limit", "unknown")
         
         # Prepare remediation request payload
         remediation_payload = {
