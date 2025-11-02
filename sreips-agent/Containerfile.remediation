@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the remediation agent application
-COPY sreips-remediation-agent.py .
+COPY remediation-agent.py .
 
 # Expose port 8080 (remediation agent runs on different port than query agent)
 EXPOSE 8080
