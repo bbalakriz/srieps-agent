@@ -2,6 +2,7 @@ from robusta.api import *
 import requests
 import os
 import re
+from pydantic import BaseModel
 
 # SREIPS Agent API endpoint - externalized
 SREIPS_AGENT_URL = os.getenv("SREIPS_AGENT_URL", "http://sreips-agent.sreips-agent.svc.cluster.local:8000")
@@ -89,6 +90,16 @@ def parse_combined_results(combined_results: str) -> tuple:
     except Exception as e:
         print(f"Error parsing combined results: {e}")
         return combined_results, ""
+
+class RemediationParams(BaseModel):
+    """Parameters for quota remediation callback"""
+    namespace: str = "unknown"
+    resource_kind: str = "unknown"
+    resource_name: str = "unknown"
+    event_reason: str = "unknown"
+    quota_resource_type: str = "unknown"
+    quota_requested: str = "unknown"
+    quota_limit: str = "unknown"
 
 def extract_quota_details(event_message: str) -> dict:
     """
@@ -222,21 +233,19 @@ def lls_agent_quota_action(event: EventChangeEvent):
         print(f"Unexpected error in lls_agent_quota_action: {e}")
 
 @action
-def remediate_quota_issue(
-    event: EventChangeEvent,
-    namespace: str = "unknown",
-    resource_kind: str = "unknown",
-    resource_name: str = "unknown",
-    event_reason: str = "unknown",
-    quota_resource_type: str = "unknown",
-    quota_requested: str = "unknown",
-    quota_limit: str = "unknown"
-):
+def remediate_quota_issue(event: EventChangeEvent, params: RemediationParams):
     """
     Callback action triggered when user clicks the remediation button
     Sends remediation request to SREIPS remediation service
     """
     try:
+        namespace = params.namespace
+        resource_kind = params.resource_kind
+        resource_name = params.resource_name
+        event_reason = params.event_reason
+        quota_resource_type = params.quota_resource_type
+        quota_requested = params.quota_requested
+        quota_limit = params.quota_limit
         
         # Prepare remediation request payload
         remediation_payload = {
