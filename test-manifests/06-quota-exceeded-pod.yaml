@@ -1,0 +1,54 @@
+---
+# Test manifest to trigger resource quota remediation
+# This creates a namespace with restrictive quota, then tries to deploy a pod that exceeds it
+
+# IMPORTANT: To avoid conflicts with server-side apply, use:
+#   oc delete resourcequota test-quota -n failure-test
+#   oc create -f 06-quota-exceeded-pod.yaml
+# OR use: oc replace --force -f 06-quota-exceeded-pod.yaml
+
+# 1. Create restrictive ResourceQuota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: test-quota
+  namespace: failure-test
+  # Remove kubectl annotation to avoid server-side apply conflicts
+  annotations: {}
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: "1Gi"
+    limits.cpu: "2"
+    limits.memory: "2Gi"
+
+---
+# 2. Use Deployment to generate continuous FailedCreate events
+# Deployment will retry pod creation and generate Warning events that Robusta can catch
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quota-exceeding-deployment
+  namespace: failure-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quota-test
+  template:
+    metadata:
+      labels:
+        app: quota-test
+    spec:
+      containers:
+      - name: busybox
+        image: busybox:latest
+        command: ["sleep", "3600"]
+        resources:
+          requests:
+            cpu: "2"          # Exceeds quota limit of 1 CPU
+            memory: "500Mi"
+          limits:
+            cpu: "2"
+            memory: "500Mi"
+
