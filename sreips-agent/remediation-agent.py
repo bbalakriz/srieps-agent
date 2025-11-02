@@ -1,47 +1,30 @@
 from llama_stack_client import LlamaStackClient
 from llama_stack_client import Agent, AgentEventLogger
-import uuid
 import os
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from typing import Optional, Dict, Any
-import uvicorn
 import json
 import logging
+import re
+import threading
+import requests
+import uuid
+import uvicorn
 
-# Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
 app = FastAPI(title="SREIPS Remediation Agent API")
 
-# Add validation error handler
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Custom handler for validation errors to log details"""
-    body = await request.body()
-    logger.error(f"Validation error for {request.method} {request.url}")
-    logger.error(f"Request body: {body.decode('utf-8')}")
-    logger.error(f"Validation errors: {exc.errors()}")
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail": exc.errors(),
-            "body": body.decode('utf-8')
-        }
-    )
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "https://lsd-llama-milvus-service-llamastack.apps.cluster-wvkq8.wvkq8.sandbox3266.opentlc.com/")
+OCP_MCP_ENDPOINT = os.getenv("OCP_MCP_ENDPOINT", "https://ocp-mcp-mcp-servers.apps.cluster-wvkq8.wvkq8.sandbox3266.opentlc.com/sse")
 
-# Global client and configuration - externalized via environment variables
-LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
-OCP_MCP_ENDPOINT = os.getenv("OCP_MCP_ENDPOINT", "")
-
-# Initialize client globally
 client = None
 model_id = None
 
@@ -73,8 +56,9 @@ def initialize_client():
         # WARNING: Using smaller models like Llama4-Scout-17B or similar WILL
         # result in UNPREDICTABLE TOOL EXECUTION BEHAVIOR and AGENT FAILURES.
         # For consistent and robust agentic functionalities (tool calls, sequences),
-        # it is strongly recommended to use larger models such as Llama-3.1-70B
-        # or any specialized models explicitly trained for tool usage.
+        # use larger models like claude sonnet or any specialized models.
+        #  At the time of writing this, the integration of Anthropic models is broken with llamastack.
+        #  See https://github.com/llamastack/llama-stack/issues/2504 for more details.
         # *********************************************************************
         if "17B" in model_id or "Scout" in model_id:
             print("⚠️  WARNING: Smaller models (17B) may have inconsistent tool execution behavior.")
@@ -93,7 +77,6 @@ def initialize_client():
             tools = client.tools.list(toolgroup_id="mcp::ocp-mcp")
             print(f"Available OCP MCP tools: {[t.identifier for t in tools]}")
         except Exception as e:
-            # Toolgroup might already be registered
             print(f"Toolgroup registration (may already exist): {e}")
 
 def execute_quota_remediation(remediation_request: RemediationRequest) -> Dict[str, Any]:
@@ -107,6 +90,7 @@ def execute_quota_remediation(remediation_request: RemediationRequest) -> Dict[s
     """
     
     namespace = remediation_request.namespace
+    quota_name = remediation_request.quota_details.get("quota_name", "unknown")
     resource_type = remediation_request.quota_details.get("resource_type", "unknown")
     requested = remediation_request.quota_details.get("requested", "unknown")
     current_limit = remediation_request.quota_details.get("current_limit", "unknown")
@@ -114,12 +98,12 @@ def execute_quota_remediation(remediation_request: RemediationRequest) -> Dict[s
     
     print(f"\n=== Remediation Request ===")
     print(f"Namespace: {namespace}")
+    print(f"Quota Name: {quota_name}")
     print(f"Resource Type: {resource_type}")
     print(f"Requested: {requested}")
     print(f"Current Limit: {current_limit}")
     print(f"Event Reason: {event_reason}")
     
-    # List available tools before creating agent (for debugging)
     try:
         available_tools = client.tools.list(toolgroup_id="mcp::ocp-mcp")
         tool_identifiers = [t.identifier for t in available_tools]
@@ -131,31 +115,43 @@ def execute_quota_remediation(remediation_request: RemediationRequest) -> Dict[s
             "message": f"Failed to list available tools: {str(e)}"
         }
     
-    # Create remediation agent with very explicit, direct instructions
-    # *************************************************************************
-    # CRITICAL for Llama4-Scout-17B: Instructions MUST be SHORT and DIRECT
-    # Long, complex instructions confuse smaller models and prevent tool use.
-    # *************************************************************************
+    # Using delete-then-recreate to avoid server-side apply conflicts
+    # Extract resource info for triggering retry
+    resource_kind = remediation_request.resource.get("kind", "unknown")
+    resource_name = remediation_request.resource.get("name", "unknown")
+    
     remediation_agent = Agent(
         client,
         model=model_id,
-        instructions=f"""You are a Kubernetes quota manager. Execute these steps:
+        instructions=f"""You are a Kubernetes executor. Call tools directly without any explanation or commentary.
 
-STEP 1: Call resources_get with api_version="v1", kind="ResourceQuota", namespace="{namespace}"
-STEP 2: Call resources_create_or_update to increase {resource_type} limit from {current_limit} to {requested}
+TASK: Update ResourceQuota '{quota_name}' in '{namespace}'
 
-DO NOT ask questions. Execute tools NOW.""",
+STEPS:
+1. Call: resources_get(apiVersion="v1", kind="ResourceQuota", name="{quota_name}", namespace="{namespace}")
+2. Call: resources_delete(apiVersion="v1", kind="ResourceQuota", name="{quota_name}", namespace="{namespace}")
+3. Call: resources_create_or_update(resource="apiVersion: v1\\nkind: ResourceQuota\\nmetadata:\\n  name: {quota_name}\\n  namespace: {namespace}\\nspec:\\n  hard:\\n    limits.cpu: '2'\\n    limits.memory: '2Gi'\\n    requests.cpu: '{requested}'\\n    requests.memory: '1Gi'")
+4. Call: resources_delete(apiVersion="apps/v1", kind="{resource_kind}", name="{resource_name}", namespace="{namespace}")
+5. STOP
+
+CRITICAL: 
+Step 3 must include EXACTLY these four lines in spec.hard:
+    limits.cpu: '2'
+    limits.memory: '2Gi'
+    requests.cpu: '{requested}'
+    requests.memory: '1Gi'
+
+Do NOT omit any of these four lines.
+""",
         tools=["mcp::ocp-mcp"],
-        max_infer_iters=100
+        max_infer_iters=10
     )
     
     print(f"Created remediation agent")
     
     session_id = remediation_agent.create_session(session_name=f"remediation-{uuid.uuid4().hex}")
     
-    # Build a very simple, direct prompt for the agent
-    # Smaller models respond better to imperative commands
-    simple_prompt = f"Get ResourceQuota in namespace {namespace} then update {resource_type} limit to {requested}"
+    simple_prompt = "Execute the steps"
     
     print(f"Executing remediation with prompt: {simple_prompt}")
     
@@ -170,8 +166,8 @@ DO NOT ask questions. Execute tools NOW.""",
         tool_executions = []
         streamed_content = []
         errors = []
+        error_counts = {} 
         
-        # Process agent response logs
         for log in AgentEventLogger().log(response):
             log.print()
             
@@ -179,9 +175,23 @@ DO NOT ask questions. Execute tools NOW.""",
                 assistant_messages.append(log)
             elif log.role == "tool_execution":
                 tool_executions.append(log)
-                # Check for tool execution errors
+                error_msg = None
+                
                 if hasattr(log, 'error') and log.error:
-                    errors.append(str(log.error))
+                    error_msg = str(log.error)
+                elif hasattr(log, 'content'):
+                    content_str = str(log.content)
+                    if 'failed' in content_str.lower() or 'error' in content_str.lower():
+                        error_msg = content_str
+                
+                if error_msg:
+                    errors.append(error_msg)
+                    error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+                    
+                    # Exit early if same error repeats 2+ times
+                    if error_counts[error_msg] >= 2:
+                        print(f"ERROR: Same error repeated {error_counts[error_msg]} times. Stopping agent.")
+                        break
             elif log.role is None or log.role == "":
                 if hasattr(log, 'content'):
                     streamed_content.append(str(log.content))
@@ -191,7 +201,6 @@ DO NOT ask questions. Execute tools NOW.""",
         print(f"Assistant messages: {len(assistant_messages)}")
         print(f"Errors: {len(errors)}")
         
-        # Determine success based on tool execution and responses
         if errors:
             return {
                 "status": "error",
@@ -211,7 +220,6 @@ DO NOT ask questions. Execute tools NOW.""",
         elif streamed_content:
             final_message = "".join(streamed_content)
         
-        # If we had tool executions and no errors, consider it successful
         if tool_executions:
             return {
                 "status": "success",
@@ -226,7 +234,6 @@ DO NOT ask questions. Execute tools NOW.""",
                 }
             }
         else:
-            # No tool executions - agent didn't use tools
             return {
                 "status": "warning",
                 "message": f"Agent responded but did not execute tools. Response: {final_message[:200]}",
@@ -271,53 +278,210 @@ async def health():
         "model": model_id if model_id else "not initialized"
     }
 
-@app.post("/remediate", response_model=RemediationResponse)
-async def remediate(http_request: Request, request: RemediationRequest):
+# This extraction step is necessary due to the less reliable output formatting of the 
+# llama4-scout-17b model from litemass. If using more robust models like Claude Sonnet, 
+# this workaround is not needed. This is a temporary solution to enable successful 
+# tool calling with llama4-scout-17b.
+# Note: This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
+# due to which the Claude Sonnet integration with llamastack is broken.
+def extract_from_slack_message(message_blocks: list) -> Dict[str, str]:
+    """
+    Extract quota information from Slack message blocks
+    """
+    data = {
+        "namespace": "unknown",
+        "resource_kind": "unknown",
+        "resource_name": "unknown",
+        "event_reason": "unknown",
+        "quota_name": "unknown",
+        "quota_resource_type": "unknown",
+        "quota_requested": "unknown",
+        "quota_limit": "unknown"
+    }
+    
+    for block in message_blocks:
+        if block.get("type") == "section" and "text" in block:
+            text = block["text"].get("text", "")
+            
+            # Extract Resource info: "Resource: ReplicaSet `name` in `namespace`"
+            resource_match = re.search(r'Resource:\*\*?\s+(\w+)\s+`([^`]+)`\s+in\s+`([^`]+)`', text)
+            if resource_match:
+                data["resource_kind"] = resource_match.group(1)
+                data["resource_name"] = resource_match.group(2)
+                data["namespace"] = resource_match.group(3)
+                logger.info(f"Extracted resource: {data['resource_kind']}/{data['resource_name']} in {data['namespace']}")
+            
+            # Extract Event Reason: "Resource Quota Issue: `FailedCreate`"
+            reason_match = re.search(r'Resource Quota Issue:\*\*?\s+`([^`]+)`', text)
+            if reason_match:
+                data["event_reason"] = reason_match.group(1)
+                logger.info(f"Extracted reason: {data['event_reason']}")
+            
+            # Extract Quota Details block
+            if "Quota Details:" in text:
+                # Quota Name: `test-quota`
+                name_match = re.search(r'Quota Name:\s+`([^`]+)`', text)
+                if name_match:
+                    data["quota_name"] = name_match.group(1)
+                
+                # Resource Type: `requests.cpu`
+                type_match = re.search(r'Resource Type:\s+`([^`]+)`', text)
+                if type_match:
+                    data["quota_resource_type"] = type_match.group(1)
+                
+                req_match = re.search(r'Requested:\s+`([^`]+)`', text)
+                if req_match:
+                    data["quota_requested"] = req_match.group(1)
+                
+                limit_match = re.search(r'Limit:\s+`([^`]+)`', text)
+                if limit_match:
+                    data["quota_limit"] = limit_match.group(1)
+                
+                logger.info(f"Extracted quota: name={data['quota_name']}, type={data['quota_resource_type']}, requested={data['quota_requested']}, limit={data['quota_limit']}")
+    
+    return data
+
+def run_remediation_async(remediation_data: RemediationRequest, response_url: str):
+    """Execute remediation in background and post results to Slack"""
+    # Send immediate confirmation
+    if response_url:
+        try:
+            requests.post(response_url, json={
+                "replace_original": True,
+                "text": f"Remediation triggered for namespace *{remediation_data.namespace}*"
+            }, headers={"Content-Type": "application/json"})
+            logger.info("Posted immediate confirmation to Slack")
+        except Exception as e:
+            logger.error(f"Failed to post immediate confirmation: {e}")
+    
+    try:
+        logger.info(f"Starting async remediation for namespace: {remediation_data.namespace}")
+        result = execute_quota_remediation(remediation_data)
+        
+        if result.get("status") == "success":
+            message = "Remediation completed successfully"
+        else:
+            message = f"Remediation failed: {result.get('message', 'Unknown error')}"
+    except Exception as e:
+        logger.error(f"Remediation error: {e}")
+        message = f"Remediation error: {str(e)}"
+    
+    # Post result to Slack
+    if response_url:
+        try:
+            requests.post(response_url, json={
+                "replace_original": True,
+                "text": message
+            }, headers={"Content-Type": "application/json"})
+            logger.info(f"Posted result to Slack: {message}")
+        except Exception as e:
+            logger.error(f"Failed to post to Slack: {e}")
+
+@app.post("/remediate")
+async def remediate(http_request: Request, payload: Optional[str] = Form(None)):
     """
     Execute automated remediation for the given issue.
+    Handles both JSON and Slack form-encoded payloads.
     Currently supports: resource_quota issues
     """
-    # Log raw incoming request FIRST (before any processing)
-    body = await http_request.body()
     logger.info("=" * 60)
     logger.info("RAW REMEDIATION REQUEST RECEIVED")
     logger.info(f"Method: {http_request.method}")
     logger.info(f"URL: {http_request.url}")
-    logger.info(f"Headers: {dict(http_request.headers)}")
-    logger.info(f"Raw Body: {body.decode('utf-8')}")
+    logger.info(f"Content-Type: {http_request.headers.get('content-type')}")
+    logger.info(f"Has form payload: {payload is not None}")
+    if payload:
+        logger.info(f"Payload (first 500 chars): {payload[:500]}")
     logger.info("=" * 60)
     
-    # Log parsed/validated request
-    logger.info("PARSED REQUEST FIELDS:")
-    logger.info(f"Issue Type: {request.issue_type}")
-    logger.info(f"Namespace: {request.namespace}")
-    logger.info(f"Resource: {request.resource}")
-    logger.info(f"Event Reason: {request.event_reason}")
-    logger.info(f"Quota Details: {request.quota_details}")
-    logger.info(f"Strategy: {request.remediation_strategy}")
+    remediation_data = None
+    response_url = None
+    
+    if payload:
+        logger.info("Detected Slack form payload")
+        try:
+            slack_data = json.loads(payload)
+            logger.info(f"Slack payload type: {slack_data.get('type')}")
+            
+            # Extract response_url for async callback
+            response_url = slack_data.get("response_url")
+            logger.info(f"Slack response_url: {response_url}")
+            
+            if "message" in slack_data and "blocks" in slack_data["message"]:
+                extracted = extract_from_slack_message(slack_data["message"]["blocks"])
+                
+                remediation_data = RemediationRequest(
+                    issue_type="resource_quota",
+                    namespace=extracted["namespace"],
+                    resource={
+                        "kind": extracted["resource_kind"],
+                        "name": extracted["resource_name"]
+                    },
+                    event_reason=extracted["event_reason"],
+                    quota_details={
+                        "quota_name": extracted["quota_name"],
+                        "resource_type": extracted["quota_resource_type"],
+                        "requested": extracted["quota_requested"],
+                        "current_limit": extracted["quota_limit"]
+                    },
+                    remediation_strategy="auto"
+                )
+                logger.info("Successfully parsed Slack payload")
+            else:
+                raise HTTPException(status_code=400, detail="No message blocks found in Slack payload")
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Slack JSON: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid JSON in payload: {e}")
+    else:
+        logger.info("Attempting to parse as JSON body")
+        try:
+            json_body = await http_request.json()
+            remediation_data = RemediationRequest(**json_body)
+            logger.info("Successfully parsed JSON body")
+        except Exception as e:
+            logger.error(f"Failed to parse as JSON: {e}")
+            raise HTTPException(status_code=400, detail=f"Could not parse request: {e}")
+    
+    logger.info("PARSED REMEDIATION REQUEST:")
+    logger.info(f"Issue Type: {remediation_data.issue_type}")
+    logger.info(f"Namespace: {remediation_data.namespace}")
+    logger.info(f"Resource: {remediation_data.resource}")
+    logger.info(f"Event Reason: {remediation_data.event_reason}")
+    logger.info(f"Quota Details: {remediation_data.quota_details}")
     logger.info("=" * 60)
     
+    # If Slack request with response_url, run async and return immediately
+    if response_url:
+        logger.info("Launching async remediation for Slack")
+        thread = threading.Thread(
+            target=run_remediation_async,
+            args=(remediation_data, response_url),
+            daemon=True
+        )
+        thread.start()
+        return {"text": "Remediation in progress...", "response_type": "ephemeral"}
+    
+    # Otherwise, run synchronously (for direct API calls)
     try:
         if not client:
             logger.error("Client not initialized")
             raise HTTPException(status_code=503, detail="Client not initialized")
         
-        # Validate request
-        if request.issue_type != "resource_quota":
-            logger.warning(f"Unsupported issue type: {request.issue_type}")
+        if remediation_data.issue_type != "resource_quota":
+            logger.warning(f"Unsupported issue type: {remediation_data.issue_type}")
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported issue type: {request.issue_type}. Currently only 'resource_quota' is supported."
+                detail=f"Unsupported issue type: {remediation_data.issue_type}. Currently only 'resource_quota' is supported."
             )
         
-        if not request.namespace or not request.namespace.strip():
+        if not remediation_data.namespace or not remediation_data.namespace.strip():
             logger.warning("Empty namespace provided")
             raise HTTPException(status_code=400, detail="Namespace cannot be empty")
         
-        # Execute remediation based on issue type
-        if request.issue_type == "resource_quota":
+        if remediation_data.issue_type == "resource_quota":
             logger.info("Executing quota remediation...")
-            result = execute_quota_remediation(request)
+            result = execute_quota_remediation(remediation_data)
             
             logger.info(f"Remediation result: {result['status']}")
             return RemediationResponse(
@@ -326,7 +490,7 @@ async def remediate(http_request: Request, request: RemediationRequest):
                 details=result.get("details")
             )
         else:
-            logger.error(f"Invalid issue type: {request.issue_type}")
+            logger.error(f"Invalid issue type: {remediation_data.issue_type}")
             raise HTTPException(status_code=400, detail="Invalid issue type")
     
     except HTTPException:
