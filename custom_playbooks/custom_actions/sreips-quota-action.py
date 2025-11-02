@@ -138,21 +138,36 @@ def lls_agent_quota_action(event: EventChangeEvent):
         # Get the Kubernetes event
         k8s_event = event.obj
         
+        # DEBUG: Log the event structure
+        print(f"DEBUG: Event type: {type(k8s_event)}")
+        print(f"DEBUG: Event dir: {dir(k8s_event)}")
+        print(f"DEBUG: Event dict (if available): {k8s_event.__dict__ if hasattr(k8s_event, '__dict__') else 'No __dict__'}")
+        
         # Safely extract event details with defaults
         event_reason = getattr(k8s_event, 'reason', 'Unknown')
         event_message = getattr(k8s_event, 'message', 'No message available')
         event_type = getattr(k8s_event, 'type', 'Warning')
         
+        print(f"DEBUG: event_reason={event_reason}, event_message={event_message}")
+        
         # Safely get involved object details
         involved_obj = getattr(k8s_event, 'involvedObject', None)
+        print(f"DEBUG: involved_obj={involved_obj}, type={type(involved_obj) if involved_obj else None}")
+        
         if involved_obj:
+            print(f"DEBUG: involved_obj dir: {dir(involved_obj)}")
+            print(f"DEBUG: involved_obj dict: {involved_obj.__dict__ if hasattr(involved_obj, '__dict__') else 'No __dict__'}")
+            
             resource_kind = getattr(involved_obj, 'kind', 'Unknown')
             resource_name = getattr(involved_obj, 'name', 'Unknown')
             resource_namespace = getattr(involved_obj, 'namespace', 'cluster-scoped')
+            
+            print(f"DEBUG: Extracted - kind={resource_kind}, name={resource_name}, namespace={resource_namespace}")
         else:
             resource_kind = 'Unknown'
             resource_name = 'Unknown'
             resource_namespace = 'Unknown'
+            print(f"DEBUG: No involvedObject found!")
         
         # Extract quota details from message
         quota_details = extract_quota_details(event_message)
