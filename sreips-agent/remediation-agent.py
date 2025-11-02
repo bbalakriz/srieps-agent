@@ -2,14 +2,40 @@ from llama_stack_client import LlamaStackClient
 from llama_stack_client import Agent, AgentEventLogger
 import uuid
 import os
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
 from typing import Optional, Dict, Any
 import uvicorn
 import json
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(title="SREIPS Remediation Agent API")
+
+# Add validation error handler
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Custom handler for validation errors to log details"""
+    body = await request.body()
+    logger.error(f"Validation error for {request.method} {request.url}")
+    logger.error(f"Request body: {body.decode('utf-8')}")
+    logger.error(f"Validation errors: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "body": body.decode('utf-8')
+        }
+    )
 
 # Global client and configuration - externalized via environment variables
 LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
@@ -113,20 +139,12 @@ def execute_quota_remediation(remediation_request: RemediationRequest) -> Dict[s
     remediation_agent = Agent(
         client,
         model=model_id,
-        instructions=f"""Update OpenShift resource quota in namespace {namespace}.
+        instructions=f"""You are a Kubernetes quota manager. Execute these steps:
 
-Resource: {resource_type}
-Current Limit: {current_limit}
-Requested: {requested}
+STEP 1: Call resources_get with api_version="v1", kind="ResourceQuota", namespace="{namespace}"
+STEP 2: Call resources_create_or_update to increase {resource_type} limit from {current_limit} to {requested}
 
-Task: Increase the quota limit to accommodate the requested amount.
-
-Use the tools available to:
-1. Get current quota settings
-2. Update quota to new value
-3. Confirm the update
-
-Be direct and use the tools immediately.""",
+DO NOT ask questions. Execute tools NOW.""",
         tools=["mcp::ocp-mcp"],
         max_infer_iters=100
     )
@@ -137,7 +155,7 @@ Be direct and use the tools immediately.""",
     
     # Build a very simple, direct prompt for the agent
     # Smaller models respond better to imperative commands
-    simple_prompt = f"Update resource quota for {resource_type} in namespace {namespace} from {current_limit} to accommodate {requested}"
+    simple_prompt = f"Get ResourceQuota in namespace {namespace} then update {resource_type} limit to {requested}"
     
     print(f"Executing remediation with prompt: {simple_prompt}")
     
@@ -254,41 +272,67 @@ async def health():
     }
 
 @app.post("/remediate", response_model=RemediationResponse)
-async def remediate(request: RemediationRequest):
+async def remediate(http_request: Request, request: RemediationRequest):
     """
     Execute automated remediation for the given issue.
     Currently supports: resource_quota issues
     """
+    # Log raw incoming request FIRST (before any processing)
+    body = await http_request.body()
+    logger.info("=" * 60)
+    logger.info("RAW REMEDIATION REQUEST RECEIVED")
+    logger.info(f"Method: {http_request.method}")
+    logger.info(f"URL: {http_request.url}")
+    logger.info(f"Headers: {dict(http_request.headers)}")
+    logger.info(f"Raw Body: {body.decode('utf-8')}")
+    logger.info("=" * 60)
+    
+    # Log parsed/validated request
+    logger.info("PARSED REQUEST FIELDS:")
+    logger.info(f"Issue Type: {request.issue_type}")
+    logger.info(f"Namespace: {request.namespace}")
+    logger.info(f"Resource: {request.resource}")
+    logger.info(f"Event Reason: {request.event_reason}")
+    logger.info(f"Quota Details: {request.quota_details}")
+    logger.info(f"Strategy: {request.remediation_strategy}")
+    logger.info("=" * 60)
+    
     try:
         if not client:
+            logger.error("Client not initialized")
             raise HTTPException(status_code=503, detail="Client not initialized")
         
         # Validate request
         if request.issue_type != "resource_quota":
+            logger.warning(f"Unsupported issue type: {request.issue_type}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported issue type: {request.issue_type}. Currently only 'resource_quota' is supported."
             )
         
         if not request.namespace or not request.namespace.strip():
+            logger.warning("Empty namespace provided")
             raise HTTPException(status_code=400, detail="Namespace cannot be empty")
         
         # Execute remediation based on issue type
         if request.issue_type == "resource_quota":
+            logger.info("Executing quota remediation...")
             result = execute_quota_remediation(request)
             
+            logger.info(f"Remediation result: {result['status']}")
             return RemediationResponse(
                 status=result["status"],
                 message=result["message"],
                 details=result.get("details")
             )
         else:
+            logger.error(f"Invalid issue type: {request.issue_type}")
             raise HTTPException(status_code=400, detail="Invalid issue type")
     
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Unexpected error in remediate endpoint: {e}")
+        logger.exception(f"Unexpected error in remediate endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing remediation: {str(e)}")
 
 if __name__ == "__main__":
