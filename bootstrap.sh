@@ -468,7 +468,7 @@ install_llamastack() {
             "no_catchup": true,
             "trigger": {
                 "cron_schedule": {
-                    "cron": "0 */12 * * *"
+                    "cron": "0 0 */12 * * ?"
                 }
             },
             "mode": "ENABLE"
