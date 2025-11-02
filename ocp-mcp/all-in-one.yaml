@@ -28,11 +28,11 @@ spec:
     spec:
       containers:
       - args:
-        - --sse-port
+        - --port
         - "8000"
         command:
         - ./kubernetes-mcp-server
-        image: quay.io/hveeradh/ocp-mcp-server:latest
+        image: quay.io/balki40/ocp-mcp-server:0.0.1
         imagePullPolicy: Always
         name: ocp-mcp-server
         ports:
