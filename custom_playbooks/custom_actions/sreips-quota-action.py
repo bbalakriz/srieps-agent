@@ -14,12 +14,14 @@ REMEDIATION_ACTION_URL = os.getenv("REMEDIATION_ACTION_URL", "http://remediation
 # ********************************************************************************************
 # WARNING: The below mapping of Kubernetes failure reasons to short search-optimized prompts
 # is REQUIRED **ONLY** because Llama4-Scout-17B (or other compact/lite models) struggles with
-# tool invocation and reasoning if you use more natural, verbose language.
+# tool invocation and reasoning with more natural, verbose language.
 # 
-# If you use larger, more sophisticated models (e.g., Llama-3.1-70B or similar), you DO NOT
+# If a larger more sophisticated model is used like Claude Sonnet, we DO NOT
 # need this brittle mapping; the agent will understand direct, full prompts naturally.
 #
 # THIS MAPPING IS A WORKAROUND FOR Llama4-Scout-17B/LiteMass limitations!
+#This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
+# due to which the Claude Sonnet integration with llamastack is broken.
 # ********************************************************************************************
 
 PROMPT_MAPPINGS = {
@@ -102,6 +104,12 @@ class RemediationParams(BaseModel):
     quota_requested: str = "unknown"
     quota_limit: str = "unknown"
 
+# NOTE: This extraction step is necessary due to the less reliable output formatting of the 
+# llama4-scout-17b model from litemass. If using more robust models like Claude Sonnet, 
+# this workaround is not needed. This is a temporary solution to enable successful 
+# tool calling with llama4-scout-17b.
+# Note: This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
+# due to which the Claude Sonnet integration with llamastack is broken.
 def extract_quota_details(event_message: str) -> dict:
     """
     Extract resource quota details from event message
@@ -114,16 +122,13 @@ def extract_quota_details(event_message: str) -> dict:
         "quota_name": "unknown"
     }
     
-    # Common patterns in quota-related messages
-    # Example: "pods \"mypod\" is forbidden: exceeded quota: compute-resources, requested: cpu=2, used: cpu=8, limited: cpu=10"
-    
+    # Common patterns in quota-related messages    
     # Extract quota name: "exceeded quota: test-quota, requested..."
     quota_name_match = re.search(r'exceeded quota:\s+([^,]+),', event_message)
     if quota_name_match:
         details["quota_name"] = quota_name_match.group(1).strip()
     
     # Extract resource type - prioritize requests.* over limits.*
-    # Pattern: "requested: requests.cpu=2" or "requested: limits.cpu=2,requests.cpu=2"
     resource_match = re.search(r'requested:\s+([^=,\s]+)=', event_message)
     if resource_match:
         first_resource = resource_match.group(1).strip()
@@ -157,13 +162,9 @@ def lls_agent_quota_action(event: EventChangeEvent):
         # Get the Kubernetes event
         k8s_event = event.obj
         
-        # Safely extract event details with defaults
-        # Note: events.k8s.io/v1 uses 'note' instead of 'message', and 'regarding' instead of 'involvedObject'
         event_reason = getattr(k8s_event, 'reason', 'Unknown')
         event_message = getattr(k8s_event, 'note', getattr(k8s_event, 'message', 'No message available'))
-        event_type = getattr(k8s_event, 'type', 'Warning')
-        
-        # Safely get involved object details (called 'regarding' in events.k8s.io/v1)
+        event_type = getattr(k8s_event, 'type', 'Warning')        
         involved_obj = getattr(k8s_event, 'regarding', getattr(k8s_event, 'involvedObject', None))
         
         if involved_obj:
@@ -180,7 +181,6 @@ def lls_agent_quota_action(event: EventChangeEvent):
         quota_details = extract_quota_details(event_message)
         print(f"DEBUG: quota_details={quota_details}")
         
-        # Map event reason to SREIPS prompt
         prompt = PROMPT_MAPPINGS.get(event_reason, f"{event_reason} resource quota OpenShift troubleshooting")
         
         # Query SREIPS Agent
@@ -190,7 +190,6 @@ def lls_agent_quota_action(event: EventChangeEvent):
         # Parse and format results
         rag_results, mcp_results = parse_combined_results(combined_results)
         
-        # Build enrichment with event-specific context
         enrichment_blocks = [
             MarkdownBlock(f"*🚨 Resource Quota Issue:* `{event_reason}`"),
             MarkdownBlock(f"*📦 Resource:* {resource_kind} `{resource_name}` in `{resource_namespace}`"),
@@ -213,7 +212,7 @@ def lls_agent_quota_action(event: EventChangeEvent):
         # Add RAG results if available
         if rag_results:
             enrichment_blocks.append(
-                MarkdownBlock(f"*📚 Knowledge Base Resolution:*\n{rag_results}")
+                MarkdownBlock(f"*📚 Matching Enterprise Knowledge Base Solution:*\n{rag_results}")
             )
             enrichment_blocks.append(DividerBlock())
         
@@ -247,14 +246,11 @@ def lls_agent_quota_action(event: EventChangeEvent):
             )
         )
         
-        # Send enrichment to destinations
         event.add_enrichment(enrichment_blocks)
         
     except AttributeError as e:
-        # Handle missing attributes gracefully
         print(f"AttributeError in lls_agent_quota_action: {e}")        
     except Exception as e:
-        # Catch any other unexpected errors
         print(f"Unexpected error in lls_agent_quota_action: {e}")
 
 @action
@@ -273,7 +269,6 @@ def remediate_quota_issue(event: EventChangeEvent, params: RemediationParams):
         quota_requested = params.quota_requested
         quota_limit = params.quota_limit
         
-        # Prepare remediation request payload
         remediation_payload = {
             "issue_type": "resource_quota",
             "namespace": namespace,
@@ -291,7 +286,6 @@ def remediate_quota_issue(event: EventChangeEvent, params: RemediationParams):
             "remediation_strategy": "auto"
         }
         
-        # Call remediation service
         try:
             response = requests.post(
                 REMEDIATION_ACTION_URL,

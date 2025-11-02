@@ -200,7 +200,7 @@ def lls_agent_action(event: PodEvent):
     # Add RAG results if available
     if rag_results:
         enrichment_blocks.append(
-            MarkdownBlock(f"*📚 Knowledge Base Resolution:*\n{rag_results}")
+            MarkdownBlock(f"*📚 Matching Enterprise Knowledge Base Solution:*\n{rag_results}")
         )
         enrichment_blocks.append(DividerBlock())
     
