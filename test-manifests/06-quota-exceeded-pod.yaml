@@ -2,11 +2,6 @@
 # Test manifest to trigger resource quota remediation
 # This creates a namespace with restrictive quota, then tries to deploy a pod that exceeds it
 
-# IMPORTANT: To avoid conflicts with server-side apply, use:
-#   oc delete resourcequota test-quota -n failure-test
-#   oc create -f 06-quota-exceeded-pod.yaml
-# OR use: oc replace --force -f 06-quota-exceeded-pod.yaml
-
 # 1. Create restrictive ResourceQuota
 apiVersion: v1
 kind: ResourceQuota
