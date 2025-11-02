@@ -498,7 +498,7 @@ spec:
       automountServiceAccountToken: true
       containers:
       - name: runner
-        image: quay.io/balki404/sreips-runner:0.0.14
+        image: quay.io/balki404/sreips-runner:0.0.16
         imagePullPolicy: IfNotPresent
         securityContext:
             allowPrivilegeEscalation: false
