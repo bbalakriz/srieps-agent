@@ -8,7 +8,7 @@ from pydantic import BaseModel
 SREIPS_AGENT_URL = os.getenv("SREIPS_AGENT_URL", "http://sreips-agent.sreips-agent.svc.cluster.local:8000")
 
 # Remediation action URL - externalized (points to remediation agent)
-REMEDIATION_ACTION_URL = os.getenv("REMEDIATION_ACTION_URL", "http://sreips-remediation-agent.sreips-core.svc.cluster.local:8080/remediate")
+REMEDIATION_ACTION_URL = os.getenv("REMEDIATION_ACTION_URL", "http://remediation-agent.sreips-agent.svc.cluster.local:8080/remediate")
 
 # Prompt mapping for ResourceQuota-related failures
 # ********************************************************************************************
