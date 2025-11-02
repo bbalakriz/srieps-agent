@@ -122,20 +122,32 @@ def extract_quota_details(event_message: str) -> dict:
     if quota_name_match:
         details["quota_name"] = quota_name_match.group(1).strip()
     
-    # Extract resource type (cpu, memory, pods, etc.)
-    resource_match = re.search(r'requested:\s+([^=]+)=', event_message)
+    # Extract resource type - prioritize requests.* over limits.*
+    # Pattern: "requested: requests.cpu=2" or "requested: limits.cpu=2,requests.cpu=2"
+    resource_match = re.search(r'requested:\s+([^=,\s]+)=', event_message)
     if resource_match:
-        details["resource_type"] = resource_match.group(1).strip()
+        first_resource = resource_match.group(1).strip()
+        # If it's limits.*, try to find requests.* instead
+        if first_resource.startswith('limits.'):
+            requests_match = re.search(r'requests\.([^=]+)=', event_message)
+            if requests_match:
+                details["resource_type"] = f"requests.{requests_match.group(1).strip()}"
+            else:
+                details["resource_type"] = first_resource
+        else:
+            details["resource_type"] = first_resource
     
-    # Extract requested amount
-    requested_match = re.search(r'requested:\s+[^=]+=([^,\s]+)', event_message)
-    if requested_match:
-        details["requested"] = requested_match.group(1).strip()
-    
-    # Extract limit
-    limit_match = re.search(r'limited:\s+[^=]+=([^,\s]+)', event_message)
-    if limit_match:
-        details["limit"] = limit_match.group(1).strip()
+    # Extract requested amount for the identified resource type
+    if details["resource_type"] != "unknown":
+        resource_type_escaped = re.escape(details["resource_type"])
+        requested_match = re.search(rf'{resource_type_escaped}=([^,\s]+)', event_message)
+        if requested_match:
+            details["requested"] = requested_match.group(1).strip()
+        
+        # Extract limit for the same resource type
+        limit_match = re.search(rf'limited:\s+{resource_type_escaped}=([^,\s]+)', event_message)
+        if limit_match:
+            details["limit"] = limit_match.group(1).strip()
     
     return details
 
@@ -164,7 +176,9 @@ def lls_agent_quota_action(event: EventChangeEvent):
             resource_namespace = 'Unknown'
         
         # Extract quota details from message
+        print(f"DEBUG: event_message={event_message}")
         quota_details = extract_quota_details(event_message)
+        print(f"DEBUG: quota_details={quota_details}")
         
         # Map event reason to SREIPS prompt
         prompt = PROMPT_MAPPINGS.get(event_reason, f"{event_reason} resource quota OpenShift troubleshooting")
