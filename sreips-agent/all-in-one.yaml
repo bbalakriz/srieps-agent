@@ -88,4 +88,108 @@ spec:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: remediation-agent-config
+data:
+  LLAMA_STACK_URL: ""
+  OCP_MCP_ENDPOINT: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remediation-agent
+  labels:
+    app: remediation-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: remediation-agent
+  template:
+    metadata:
+      labels:
+        app: remediation-agent
+    spec:
+      containers:
+      - name: remediation-agent
+        image: quay.io/balki404/remediation-agent:2nov-0
+        imagePullPolicy: IfNotPresent
+        command: ["python", "sreips-remediation-agent.py"]
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        env:
+          - name: LLAMA_STACK_URL
+            valueFrom:
+              configMapKeyRef:
+                name: remediation-agent-config
+                key: LLAMA_STACK_URL
+          - name: OCP_MCP_ENDPOINT
+            valueFrom:
+              configMapKeyRef:
+                name: remediation-agent-config
+                key: OCP_MCP_ENDPOINT
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: remediation-agent
+  labels:
+    app: remediation-agent
+spec:
+  selector:
+    app: remediation-agent
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: remediation-agent
+  labels:
+    app: remediation-agent
+spec:
+  to:
+    kind: Service
+    name: remediation-agent
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+
+
 
