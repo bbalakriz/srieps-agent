@@ -97,6 +97,7 @@ class RemediationParams(BaseModel):
     resource_kind: str = "unknown"
     resource_name: str = "unknown"
     event_reason: str = "unknown"
+    quota_name: str = "unknown"
     quota_resource_type: str = "unknown"
     quota_requested: str = "unknown"
     quota_limit: str = "unknown"
@@ -109,11 +110,17 @@ def extract_quota_details(event_message: str) -> dict:
     details = {
         "resource_type": "unknown",
         "requested": "unknown",
-        "limit": "unknown"
+        "limit": "unknown",
+        "quota_name": "unknown"
     }
     
     # Common patterns in quota-related messages
     # Example: "pods \"mypod\" is forbidden: exceeded quota: compute-resources, requested: cpu=2, used: cpu=8, limited: cpu=10"
+    
+    # Extract quota name: "exceeded quota: test-quota, requested..."
+    quota_name_match = re.search(r'exceeded quota:\s+([^,]+),', event_message)
+    if quota_name_match:
+        details["quota_name"] = quota_name_match.group(1).strip()
     
     # Extract resource type (cpu, memory, pods, etc.)
     resource_match = re.search(r'requested:\s+([^=]+)=', event_message)
@@ -181,6 +188,7 @@ def lls_agent_quota_action(event: EventChangeEvent):
         if quota_details["resource_type"] != "unknown":
             quota_info = (
                 f"*📊 Quota Details:*\n"
+                f"• Quota Name: `{quota_details['quota_name']}`\n"
                 f"• Resource Type: `{quota_details['resource_type']}`\n"
                 f"• Requested: `{quota_details['requested']}`\n"
                 f"• Limit: `{quota_details['limit']}`"
@@ -208,6 +216,7 @@ def lls_agent_quota_action(event: EventChangeEvent):
             "resource_kind": resource_kind,
             "resource_name": resource_name,
             "event_reason": event_reason,
+            "quota_name": quota_details["quota_name"],
             "quota_resource_type": quota_details["resource_type"],
             "quota_requested": quota_details["requested"],
             "quota_limit": quota_details["limit"]
@@ -245,6 +254,7 @@ def remediate_quota_issue(event: EventChangeEvent, params: RemediationParams):
         resource_kind = params.resource_kind
         resource_name = params.resource_name
         event_reason = params.event_reason
+        quota_name = params.quota_name
         quota_resource_type = params.quota_resource_type
         quota_requested = params.quota_requested
         quota_limit = params.quota_limit
@@ -259,6 +269,7 @@ def remediate_quota_issue(event: EventChangeEvent, params: RemediationParams):
             },
             "event_reason": event_reason,
             "quota_details": {
+                "quota_name": quota_name,
                 "resource_type": quota_resource_type,
                 "requested": quota_requested,
                 "current_limit": quota_limit
