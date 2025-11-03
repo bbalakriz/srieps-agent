@@ -4,6 +4,8 @@
 
 Use the master bootstrap script to install all components automatically:
 
+> **⚠️ Important**: The target OpenShift cluster must NOT have RHOAI (Red Hat OpenShift AI) installed before using this bootstrap. SREIPS has its own AI/ML infrastructure and conflicts may occur with existing RHOAI installations.
+
 ### 1. Set up Slack Integration (Required)
 
 Before deployment, you need to create a Slack Bot/App for SREIPS notifications:
@@ -30,10 +32,31 @@ Before deployment, you need to create a Slack Bot/App for SREIPS notifications:
 4. Copy the **Bot User OAuth Token** (starts with `xoxb-...`)
    - This is your `SLACK_API_KEY` for `config.env`
 
-#### Step 4: Add Bot to Channel
+#### Step 4: Get Signing Secret
+1. In your app settings, go to **Basic Information**
+2. Scroll down to **App Credentials** section
+3. Copy the **Signing Secret**
+   - This is your `SIGNING_KEY` for `config.env`
+   - This is used to verify that requests to your remediation agent are coming from Slack
+
+#### Step 5: Configure Interactivity & Shortcuts
+1. In your app settings, go to **Interactivity & Shortcuts**
+2. Toggle **Interactivity** to **On**
+3. Set the **Request URL** to: `<remediation-agent-route-url>/remediate`
+   - Example: `https://sreips-remediation-agent-sreips-agent.apps.your-cluster.com/remediate`
+   - To get the route URL after deployment, run:
+     ```bash
+     oc get route sreips-remediation-agent -n sreips-agent -o jsonpath='{.spec.host}'
+     ```
+   - Then use: `https://<route-host>/remediate`
+4. Click **Save Changes**
+
+**Note**: You'll need to update this URL after deploying SREIPS, as the route won't exist until the remediation agent is deployed.
+
+#### Step 6: Add Bot to Channel
 1. Create or choose a Slack channel (e.g., `#sreips-helper`)
 2. In the channel, type `/invite @SREIPS Bot` (or your bot name)
-3. The bot name you use here is your `SLACK_CHANNEL` for `config.env`
+3. The channel name you use here is your `SLACK_CHANNEL` for `config.env`
 
 ### 2. Configure your environment
 
@@ -61,7 +84,7 @@ Before running the bootstrap script, you need to configure the following in `con
 ### SREIPS Core
 - **Slack API key** - Obtained from steps above (starts with `xoxb-`)
 - **Slack channel** - Channel name where notifications will be sent (e.g., `sreips-helper`)
-- **Sentry DSN** - (Optional) For error tracking from https://sentry.io
+- **Signing key** - Slack signing secret for verifying requests from Slack (from Basic Information → App Credentials)
 - **Cluster name** - Your OpenShift cluster identifier
 
 ### MinIO
@@ -94,13 +117,17 @@ See `config.env.template` for detailed descriptions and example values.
 
 ## Component Overview
 
-The SREIPS platform consists of 5 main components that are installed in sequence:
+The SREIPS platform consists of 7 main components that are installed in sequence:
 
 1. **sreips-core**: Core SREIPS monitoring and automation framework based on Robusta
 2. **minio**: Object storage for data pipeline artifacts
-3. **rh-kcs-mcp**: Red Hat Knowledge Centered Service MCP server for KB access
-4. **llamastack**: AI/ML pipeline infrastructure with Milvus vector database
-5. **sreips-agent**: Main SREIPS agent that orchestrates troubleshooting workflows
+3. **ocp-mcp**: OpenShift MCP server that provides cluster management capabilities for the remediation agent
+4. **rh-kcs-mcp**: Red Hat Knowledge Centered Service MCP server for KB access
+5. **llamastack**: AI/ML pipeline infrastructure with Milvus vector database
+6. **sreips-agent**: Main SREIPS agent that orchestrates troubleshooting workflows
+7. **remediation-agent**: Automated remediation agent for self-healing capabilities with interactive Slack buttons
+
+For detailed architecture and data flow diagrams, see [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ## Manual Deployment (Alternative)
 
@@ -112,14 +139,15 @@ source config.env
 source bootstrap.sh
 
 # Run individual installation functions
-install_sreips_core    # Step 2
-install_minio          # Step 3
-install_rh_kcs_mcp     # Step 4
-install_llamastack     # Step 5
-install_sreips_agent   # Step 6
+install_sreips_core    # Step 2: Core monitoring framework
+install_minio          # Step 3: Object storage
+install_ocp_mcp        # Step 4: OpenShift MCP server for remediation agent
+install_rh_kcs_mcp     # Step 5: Red Hat KCS MCP server
+install_llamastack     # Step 6: AI/ML pipeline infrastructure
+install_sreips_agent   # Step 7: SREIPS and Remediation agents
 ```
 
-Note: Manual deployment requires that you run steps in sequence as later components depend on earlier ones.
+Note: Manual deployment requires that you run steps in sequence as later components depend on earlier ones. The remediation agent specifically requires the OCP MCP server (step 4) to perform cluster operations.
 
 ## Troubleshooting
 
@@ -131,6 +159,48 @@ If installation fails:
 4. View pod logs: `oc logs -n <namespace> <pod-name>`
 5. The script will provide detailed error messages indicating where the failure occurred
 
+## Post-Deployment Steps
+
+After the bootstrap script completes successfully, you need to update your Slack app configuration:
+
+1. **Get the Remediation Agent Route URL:**
+   ```bash
+   oc get route remediation-agent -n sreips-agent -o jsonpath='{.spec.host}'
+   ```
+
+2. **Update Slack App Interactivity URL:**
+   - Go back to your Slack app settings at https://api.slack.com/apps
+   - Navigate to **Interactivity & Shortcuts**
+   - Update the **Request URL** to: `https://<route-from-step-1>/remediate`
+   - Click **Save Changes**
+
+This enables the interactive remediation buttons in Slack notifications.
+
 ## Using SREIPS
 
-To test SREIPS event detection and notification, apply the sample manifests in `./test-manifests`. These manifests will generate simulated issues or failures. SREIPS will detect the resulting events, send detailed notifications to your configured Slack channel and include enriched solutions based on data from your enterprise knowledge base and Red Hat KCS.
+To test SREIPS event detection and notification, apply the sample manifests in `./test-manifests`. These manifests will generate simulated issues or failures. SREIPS will detect the resulting events, send detailed notifications to your configured Slack channel and include enriched solutions based on data from your enterprise knowledge base and Red Hat KCS. 
+
+### Automated Remediation
+
+The **remediation-agent** provides self-healing capabilities for resource quota issues:
+
+- **AI powered analysis**: Automatically analyzes quota violations using LlamaStack
+- **One click fixes**: Interactive Slack buttons to trigger automated remediation
+- **Safe operations**: Uses the OCP MCP server to perform auditable cluster operations
+- **Real time feedback**: Immediate success/failure notifications back to Slack
+- **Secure**: Request verification using Slack signing secret to ensure authenticity
+
+#### Testing Remediation
+
+To test the automated remediation feature, use the quota test manifest:
+
+```bash
+oc apply -f test-manifests/06-quota-exceeded-pod.yaml
+```
+
+This will:
+1. Create a namespace with restrictive resource quotas
+2. Attempt to deploy a pod that exceeds the quota
+3. Trigger SREIPS to detect the quota violation
+4. Send a Slack notification with an interactive "Remediate" button
+5. Click the button to trigger automated quota adjustment via the remediation-agent
