@@ -122,12 +122,12 @@ The SREIPS platform consists of 7 main components that are installed in sequence
 1. **sreips-core**: Core SREIPS monitoring and automation framework based on Robusta
 2. **minio**: Object storage for data pipeline artifacts
 3. **ocp-mcp**: OpenShift MCP server that provides cluster management capabilities for the remediation agent
-4. **rh-kcs-mcp**: Red Hat Knowledge Centered Service MCP server for KB access
+4. **rh-kcs-mcp**: Red Hat Knowledgebase Content Services MCP server for KB access
 5. **llamastack**: AI/ML pipeline infrastructure with Milvus vector database
 6. **sreips-agent**: Main SREIPS agent that orchestrates troubleshooting workflows
 7. **remediation-agent**: Automated remediation agent for self-healing capabilities with interactive Slack buttons
 
-For detailed architecture and data flow diagrams, see [ARCHITECTURE.md](./ARCHITECTURE.md)
+For detailed architecture and data flow diagrams, see [ARCHITECTURE.md](https://docs.google.com/presentation/d/1mDIUx_LKE_zHQxduarDN1AXC6TIuSUj9XT8eVc2P2AQ)
 
 ## Manual Deployment (Alternative)
 
@@ -190,17 +190,42 @@ The **remediation-agent** provides self-healing capabilities for resource quota 
 - **Real time feedback**: Immediate success/failure notifications back to Slack
 - **Secure**: Request verification using Slack signing secret to ensure authenticity
 
-#### Testing Remediation
+#### Testing Different Scenarios
 
-To test the automated remediation feature, use the quota test manifest:
+The `test-manifests/` directory contains various test scenarios to validate SREIPS detection and notification capabilities:
 
+##### 1. CrashLoop Detection
+```bash
+oc apply -f test-manifests/01-crashloop-pod.yaml
+```
+Tests detection of pods stuck in CrashLoopBackOff state. SREIPS will analyze container logs and provide troubleshooting guidance.
+
+##### 2. ImagePullBackOff Detection
+```bash
+oc apply -f test-manifests/02-imagepull-pod.yaml
+```
+Tests detection of image pull failures. SREIPS will identify the missing or inaccessible image and suggest resolution steps.
+
+##### 3. Out of Memory (OOM) Detection
+```bash
+oc apply -f test-manifests/03-oom-pod.yaml
+```
+Tests detection of OOM killed containers. SREIPS will analyze memory usage patterns and recommend appropriate resource limits.
+
+##### 4. PVC Failure Detection
+```bash
+oc apply -f test-manifests/05-pvc-failure.yaml
+```
+Tests detection of persistent volume claim binding failures. SREIPS will analyze storage class availability and quota issues.
+
+##### 5. Quota Exceeded with Automated Remediation
 ```bash
 oc apply -f test-manifests/06-quota-exceeded-pod.yaml
 ```
-
-This will:
+Tests the automated remediation feature for resource quota violations. This will:
 1. Create a namespace with restrictive resource quotas
 2. Attempt to deploy a pod that exceeds the quota
 3. Trigger SREIPS to detect the quota violation
 4. Send a Slack notification with an interactive "Remediate" button
 5. Click the button to trigger automated quota adjustment via the remediation-agent
+
