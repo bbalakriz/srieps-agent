@@ -32,7 +32,7 @@ spec:
         - "8000"
         command:
         - ./kubernetes-mcp-server
-        image: quay.io/balki40/ocp-mcp-server:0.0.1
+        image: quay.io/balki404/ocp-mcp-server:0.0.1
         imagePullPolicy: Always
         name: ocp-mcp-server
         ports:
