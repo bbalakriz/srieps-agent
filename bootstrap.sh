@@ -180,7 +180,6 @@ check_prerequisites() {
     [ -z "${SLACK_API_KEY:-}" ] && missing_vars+=("SLACK_API_KEY")
     [ -z "${SLACK_CHANNEL:-}" ] && missing_vars+=("SLACK_CHANNEL")
     [ -z "${SIGNING_KEY:-}" ] && missing_vars+=("SIGNING_KEY")
-    # [ -z "${SENTRY_DSN:-}" ] && missing_vars+=("SENTRY_DSN")
     [ -z "${CLUSTER_NAME:-}" ] && missing_vars+=("CLUSTER_NAME")
     
     # MinIO variables
@@ -288,11 +287,7 @@ EOF
         }
     ' | oc apply -f -
     
-    # log_info "Patching sreips-runner-secret with Sentry DSN from config.env..."
-    # oc create secret generic sreips-runner-secret \
-    #     --from-literal=SENTRY_DSN="$SENTRY_DSN" \
-    #     -n sreips-core \
-    #     --dry-run=client -o yaml | oc apply -f -
+
     
     log_info "Restarting sreips-runner deployment to pick up updated secrets..."
     oc rollout restart deployment/sreips-runner -n sreips-core
