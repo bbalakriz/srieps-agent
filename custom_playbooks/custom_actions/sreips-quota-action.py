@@ -16,12 +16,12 @@ REMEDIATION_ACTION_URL = os.getenv("REMEDIATION_ACTION_URL", "http://remediation
 # is REQUIRED **ONLY** because Llama4-Scout-17B (or other compact/lite models) struggles with
 # tool invocation and reasoning with more natural, verbose language.
 # 
-# If a larger more sophisticated model is used like Claude Sonnet, we DO NOT
+# If a larger more sophisticated model is used like Claude Sonnet, GPT series, we DO NOT
 # need this brittle mapping; the agent will understand direct, full prompts naturally.
 #
 # THIS MAPPING IS A WORKAROUND FOR Llama4-Scout-17B/LiteMass limitations!
-#This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
-# due to which the Claude Sonnet integration with llamastack is broken.
+# This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
+# due to which the OpenAI, Anthropic SOTA models integration with llamastack is broken.
 # ********************************************************************************************
 
 PROMPT_MAPPINGS = {
@@ -109,7 +109,7 @@ class RemediationParams(BaseModel):
 # this workaround is not needed. This is a temporary solution to enable successful 
 # tool calling with llama4-scout-17b.
 # Note: This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
-# due to which the Claude Sonnet integration with llamastack is broken.
+# due to which the OpenAI, Anthropic SOTA models integration with llamastack is broken.
 def extract_quota_details(event_message: str) -> dict:
     """
     Extract resource quota details from event message

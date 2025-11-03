@@ -10,12 +10,14 @@ SREIPS_AGENT_URL = os.getenv("SREIPS_AGENT_URL", "http://sreips-agent.sreips-age
 # ********************************************************************************************
 # WARNING: The below mapping of Kubernetes failure reasons to short search-optimized prompts
 # is REQUIRED **ONLY** because Llama4-Scout-17B (or other compact/lite models) struggles with
-# tool invocation and reasoning if you use more natural, verbose language.
+# tool invocation and reasoning with more natural, verbose language.
 # 
-# If you use larger, more sophisticated models (e.g., Llama-3.1-70B or similar), you DO NOT
+# If a larger more sophisticated model is used like Claude Sonnet, GPT series, we DO NOT
 # need this brittle mapping; the agent will understand direct, full prompts naturally.
 #
 # THIS MAPPING IS A WORKAROUND FOR Llama4-Scout-17B/LiteMass limitations!
+# This workaround is required because of https://github.com/llamastack/llama-stack/issues/2504,
+# due to which the OpenAI, Anthropic SOTA models integration with llamastack is broken.
 # ********************************************************************************************
 
 PROMPT_MAPPINGS = {
