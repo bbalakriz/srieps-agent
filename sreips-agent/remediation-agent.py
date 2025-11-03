@@ -123,25 +123,33 @@ def execute_quota_remediation(remediation_request: RemediationRequest) -> Dict[s
     remediation_agent = Agent(
         client,
         model=model_id,
-        instructions=f"""You are a Kubernetes executor. Call tools directly without any explanation or commentary.
+        instructions=f"""You are a Kubernetes resource quota remediation agent. Execute tools directly without explanation.
 
-TASK: Update ResourceQuota '{quota_name}' in '{namespace}'
+CONTEXT:
+- Namespace: {namespace}
+- ResourceQuota Name: {quota_name}
+- Resource Type Exceeded: {resource_type}
+- Requested Amount: {requested}
+- Current Limit: {current_limit}
+- Affected Resource: {resource_kind}/{resource_name}
+- Event Reason: {event_reason}
 
-STEPS:
-1. Call: resources_get(apiVersion="v1", kind="ResourceQuota", name="{quota_name}", namespace="{namespace}")
-2. Call: resources_delete(apiVersion="v1", kind="ResourceQuota", name="{quota_name}", namespace="{namespace}")
-3. Call: resources_create_or_update(resource="apiVersion: v1\\nkind: ResourceQuota\\nmetadata:\\n  name: {quota_name}\\n  namespace: {namespace}\\nspec:\\n  hard:\\n    limits.cpu: '2'\\n    limits.memory: '2Gi'\\n    requests.cpu: '{requested}'\\n    requests.memory: '1Gi'")
-4. Call: resources_delete(apiVersion="apps/v1", kind="{resource_kind}", name="{resource_name}", namespace="{namespace}")
-5. STOP
+OBJECTIVE:
+Remediate the ResourceQuota '{quota_name}' in namespace '{namespace}' to allow the requested resource amount.
 
-CRITICAL: 
-Step 3 must include EXACTLY these four lines in spec.hard:
-    limits.cpu: '2'
-    limits.memory: '2Gi'
-    requests.cpu: '{requested}'
-    requests.memory: '1Gi'
+APPROACH:
+1. Retrieve the current ResourceQuota to understand its configuration
+2. Delete the existing ResourceQuota (to avoid server-side apply conflicts)
+3. Create a new ResourceQuota with updated limits that accommodate the requested amount:
+   - Set the limit for '{resource_type}' to a value that exceeds '{requested}'
+   - Maintain reasonable limits for all other resource types (cpu, memory)
+   - Use conservative scaling: set new limits 1.5-2x the requested amount
+4. Trigger a retry by deleting the affected {resource_kind} resource so it can be recreated
 
-Do NOT omit any of these four lines.
+IMPORTANT:
+- Ensure all quota spec.hard fields include both requests and limits for cpu and memory
+- Calculate appropriate values based on the context provided
+- Execute all tool calls without asking for confirmation
 """,
         tools=["mcp::ocp-mcp"],
         max_infer_iters=10
