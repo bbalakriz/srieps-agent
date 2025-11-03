@@ -1,6 +1,25 @@
 ---
 # Test manifest to trigger resource quota remediation
 # This creates a namespace with restrictive quota, then tries to deploy a pod that exceeds it
+#
+# PURPOSE: Test the automated remediation-agent feature
+#
+# HOW TO USE:
+#   oc apply -f test-manifests/06-quota-exceeded-pod.yaml
+#
+# WHAT HAPPENS:
+#   1. Creates a namespace (failure-test) with restrictive ResourceQuota
+#   2. Deployment attempts to create a pod that exceeds the quota
+#   3. SREIPS detects the quota violation event
+#   4. SREIPS analyzes the issue and sends a Slack notification
+#   5. Slack message includes an interactive "Remediate" button
+#   6. Clicking the button triggers the remediation-agent
+#   7. Remediation-agent uses OCP MCP server to adjust the quota
+#   8. Deployment successfully creates the pod
+#
+# CLEANUP:
+#   oc delete -f test-manifests/06-quota-exceeded-pod.yaml
+#   oc delete namespace failure-test
 
 # 1. Create restrictive ResourceQuota
 apiVersion: v1
