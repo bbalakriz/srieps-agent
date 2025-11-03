@@ -179,7 +179,8 @@ check_prerequisites() {
     # SREIPS Core variables
     [ -z "${SLACK_API_KEY:-}" ] && missing_vars+=("SLACK_API_KEY")
     [ -z "${SLACK_CHANNEL:-}" ] && missing_vars+=("SLACK_CHANNEL")
-    [ -z "${SENTRY_DSN:-}" ] && missing_vars+=("SENTRY_DSN")
+    [ -z "${SIGNING_KEY:-}" ] && missing_vars+=("SIGNING_KEY")
+    # [ -z "${SENTRY_DSN:-}" ] && missing_vars+=("SENTRY_DSN")
     [ -z "${CLUSTER_NAME:-}" ] && missing_vars+=("CLUSTER_NAME")
     
     # MinIO variables
@@ -230,6 +231,7 @@ install_sreips_core() {
         # Create a temporary file with updated values
         sed -e "s|api_key:.*|api_key: ${SLACK_API_KEY}|g" \
             -e "s|slack_channel:.*|slack_channel: ${SLACK_CHANNEL}|g" \
+            -e "s|signing_key:.*|signing_key: \"${SIGNING_KEY}\"|g" \
             -e "s|cluster_name:.*|cluster_name: ${CLUSTER_NAME}|g" \
             -e "s|clusterName:.*|clusterName: ${CLUSTER_NAME}|g" \
             sreips-playbooks-config-secret.yaml > /tmp/sreips-playbooks-config-updated.yaml
@@ -258,7 +260,7 @@ EOF
         # Clean up temp file
         rm -f /tmp/sreips-playbooks-config-updated.yaml
         
-        log_success "Created sreips-playbooks-config-secret with Slack API key, channel, and cluster name"
+        log_success "Created sreips-playbooks-config-secret with Slack API key, channel, signing key, and cluster name"
     else
         log_warning "sreips-playbooks-config-secret.yaml not found"
     fi
@@ -286,11 +288,11 @@ EOF
         }
     ' | oc apply -f -
     
-    log_info "Patching sreips-runner-secret with Sentry DSN from config.env..."
-    oc create secret generic sreips-runner-secret \
-        --from-literal=SENTRY_DSN="$SENTRY_DSN" \
-        -n sreips-core \
-        --dry-run=client -o yaml | oc apply -f -
+    # log_info "Patching sreips-runner-secret with Sentry DSN from config.env..."
+    # oc create secret generic sreips-runner-secret \
+    #     --from-literal=SENTRY_DSN="$SENTRY_DSN" \
+    #     -n sreips-core \
+    #     --dry-run=client -o yaml | oc apply -f -
     
     log_info "Restarting sreips-runner deployment to pick up updated secrets..."
     oc rollout restart deployment/sreips-runner -n sreips-core
@@ -361,9 +363,9 @@ install_ocp_mcp() {
     log_info "Waiting for OCP MCP server pod to be ready..."
     wait_for_pod "mcp-servers" "app=ocp-mcp-server" 300
     
-    log_info "Capturing OCP MCP endpoint..."
-    OCP_MCP_SERVICE=$(oc get svc ocp-mcp-server -n mcp-servers -o jsonpath='{.spec.clusterIP}')
-    export OCP_MCP_ENDPOINT="http://${OCP_MCP_SERVICE}:8000/sse"
+    log_info "Capturing OCP MCP endpoint route..."
+    OCP_MCP_ROUTE=$(oc get route ocp-mcp -n mcp-servers -o jsonpath='{.spec.host}')
+    export OCP_MCP_ENDPOINT="https://${OCP_MCP_ROUTE}/sse"
     log_success "OCP MCP Endpoint: $OCP_MCP_ENDPOINT"
     
     log_success "OpenShift MCP Server installation completed"
