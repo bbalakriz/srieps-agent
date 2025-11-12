@@ -2,7 +2,7 @@
 # Name: docling-convert-pipeline
 # Description: Converts PDF documents in a git repository to Markdown using Docling and generates embeddings
 # Inputs:
-#    base_url: str [Default: 'https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master']
+#    base_url: str [Default: 'https://raw.githubusercontent.com/bbalakriz/srieps-agent/refs/heads/master/llamastack']
 #    embed_model_id: str [Default: 'ibm-granite/granite-embedding-125m-english']
 #    max_tokens: int [Default: 512.0]
 #    num_workers: int [Default: 1.0]
@@ -778,7 +778,7 @@ root:
   inputDefinitions:
     parameters:
       base_url:
-        defaultValue: https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master
+        defaultValue: https://raw.githubusercontent.com/bbalakriz/srieps-agent/refs/heads/master/llamastack
         description: Base URL to fetch PDF files from
         isOptional: true
         parameterType: STRING
