@@ -302,7 +302,7 @@ def docling_convert(
 # disabling GPU by default for broader compatibility
 @dsl.pipeline()
 def docling_convert_pipeline(
-    base_url: str = "https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master",
+    base_url: str = "https://raw.githubusercontent.com/bbalakriz/srieps-agent/refs/heads/master/llamastack",
     pdf_filenames: str = "SREIPS-Prod-troubleshooting-Knowledge-Base.pdf",
     num_workers: int = 1,
     vector_db_id: str = "sreips_vector_id",
