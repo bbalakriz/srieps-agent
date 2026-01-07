@@ -340,7 +340,7 @@ deploymentSpec:
           \ == \".pdf\"\n    ]\n\n    print(f\"Found PDFs for processing:\" , all_pdfs)\n\
           \n    splits = [\n        batch for batch in (all_pdfs[i::num_splits] for\
           \ i in range(num_splits)) if batch\n    ]\n    return splits or [[]]\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.1
+        image: quay.io/balki404/docling-pipeline:0.0.2
     exec-docling-convert:
       container:
         args:
@@ -354,7 +354,7 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'docling>=2.43.0'\
-          \ 'transformers' 'sentence-transformers' 'llama-stack==0.2.20' 'llama-stack-client==0.2.20'\
+          \ 'transformers' 'sentence-transformers' 'llama-stack==0.3.1' 'llama-stack-client==0.3.1'\
           \ 'pymilvus' 'fire' 'rapidocr-onnxruntime' 'rapidocr' 'onnxruntime'  &&\
           \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
@@ -461,7 +461,7 @@ deploymentSpec:
           \ LlamaStack client\n    client = LlamaStackClient(base_url=service_url)\n\
           \n    # Process the conversion results and insert embeddings into the vector\
           \ database\n    process_and_insert_embeddings(conv_results)\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.1
+        image: quay.io/balki404/docling-pipeline:0.0.2
         resources:
           accelerator:
             count: '1'
@@ -489,7 +489,7 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'docling>=2.43.0'\
-          \ 'transformers' 'sentence-transformers' 'llama-stack==0.2.20' 'llama-stack-client==0.2.20'\
+          \ 'transformers' 'sentence-transformers' 'llama-stack==0.3.1' 'llama-stack-client==0.3.1'\
           \ 'pymilvus' 'fire' 'rapidocr-onnxruntime' 'rapidocr' 'onnxruntime'  &&\
           \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
@@ -596,7 +596,7 @@ deploymentSpec:
           \ LlamaStack client\n    client = LlamaStackClient(base_url=service_url)\n\
           \n    # Process the conversion results and insert embeddings into the vector\
           \ database\n    process_and_insert_embeddings(conv_results)\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.1
+        image: quay.io/balki404/docling-pipeline:0.0.2
         resources:
           cpuLimit: 4.0
           cpuRequest: 0.5
@@ -646,7 +646,7 @@ deploymentSpec:
           \ {filename}\")\n        except requests.exceptions.RequestException as\
           \ e:\n            print(f\"Failed to download {filename}: {e}, skipping.\"\
           )\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.1
+        image: quay.io/balki404/docling-pipeline:0.0.2
     exec-register-vector-db:
       container:
         args:
@@ -659,7 +659,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'llama-stack-client==0.2.20'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'llama-stack-client==0.3.1'\
           \ 'fire' 'requests'  &&  python3 -m pip install --quiet --no-warn-script-location\
           \ 'kfp==2.14.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
           3.9\"' && \"$0\" \"$@\"\n"
@@ -689,7 +689,7 @@ deploymentSpec:
           \        provider_id=\"milvus\",\n    )\n    print(\n        f\"Registered\
           \ vector DB '{vector_db_id}' with embedding model '{embed_model_id}'.\"\n\
           \    )\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.1
+        image: quay.io/balki404/docling-pipeline:0.0.2
 pipelineInfo:
   description: Converts PDF documents in a git repository to Markdown using Docling
     and generates embeddings

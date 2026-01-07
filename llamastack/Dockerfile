@@ -13,8 +13,8 @@ RUN pip install \
     docling>=2.43.0 \
     transformers \
     sentence-transformers \
-    llama-stack==0.2.20 \
-    llama-stack-client==0.2.20 \
+    llama-stack==0.3.1 \
+    llama-stack-client==0.3.1 \
     pymilvus \
     fire \
     rapidocr-onnxruntime \

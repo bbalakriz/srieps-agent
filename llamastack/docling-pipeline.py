@@ -5,7 +5,7 @@ from kfp import compiler, dsl
 from kfp.kubernetes import add_node_selector_json, add_toleration_json
 
 # PYTHON_BASE_IMAGE = "registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168"
-PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.0.1"
+PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.0.2"
 PYTORCH_CUDA_IMAGE = "quay.io/modh/odh-pipeline-runtime-pytorch-cuda-py311-ubi9@sha256:4706be608af3f33c88700ef6ef6a99e716fc95fc7d2e879502e81c0022fd840e"
 
 _log = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ _log = logging.getLogger(__name__)
 # This component registers the given vector database in LlamaStack. We will use inbuilt Milvus as the vector DB provider.
 @dsl.component(
     base_image=PYTHON_BASE_IMAGE,
-    packages_to_install=["llama-stack-client==0.2.20", "fire", "requests"],
+    packages_to_install=["llama-stack-client==0.3.1", "fire", "requests"],
 )
 def register_vector_db(
     service_url: str,
@@ -116,8 +116,8 @@ def create_pdf_splits(
         "docling>=2.43.0",
         "transformers",
         "sentence-transformers",
-        "llama-stack==0.2.20",
-        "llama-stack-client==0.2.20",
+        "llama-stack==0.3.1",
+        "llama-stack-client==0.3.1",
         "pymilvus",
         "fire",
         "rapidocr-onnxruntime",
