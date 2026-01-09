@@ -121,9 +121,18 @@ def convert_markdown_to_slack(text: str) -> str:
     """
     Convert standard markdown to Slack-compatible markdown
     - **bold** → *bold* (Slack uses single asterisks for bold)
+    - Headers (##, ###) → *bold text* (Slack doesn't support headers)
+    - Remove language tags from code blocks (```bash → ```)
     - Keep bullets and numbered lists as-is
     - Preserve code blocks with backticks
     """
+    # Remove language tags from code blocks (```bash → ```, ```python → ```, etc.)
+    text = re.sub(r'```(\w+)\n', '```\n', text)
+    
+    # Convert headers to bold text
+    # ## Header → *Header*
+    text = re.sub(r'^##+\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+    
     # Convert double asterisks (standard markdown bold) to single asterisks (Slack bold)
     text = re.sub(r'\*\*([^\*]+)\*\*', r'*\1*', text)
     
