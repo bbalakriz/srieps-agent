@@ -20,7 +20,7 @@ def register_vector_db(
     service_url: str,
     vector_db_id: str,
     embed_model_id: str,
-):
+) -> str:
     from llama_stack_client import LlamaStackClient
 
     client = LlamaStackClient(base_url=service_url)
@@ -40,15 +40,19 @@ def register_vector_db(
 
     embedding_dimension = matching_model.metadata["embedding_dimension"]
 
-    _ = client.vector_dbs.register(
-        vector_db_id=vector_db_id,
-        embedding_model=matching_model.identifier,
-        embedding_dimension=embedding_dimension,
-        provider_id="milvus",
+    vector_store = client.vector_stores.create(
+        name=vector_db_id,
+        extra_body={
+            "provider_id": "milvus",
+            "embedding_model": matching_model.identifier,
+            "embedding_dimension": embedding_dimension,
+        }
     )
     print(
-        f"Registered vector DB '{vector_db_id}' with embedding model '{embed_model_id}'."
+        f"Created vector store '{vector_db_id}' with embedding model '{embed_model_id}' with the vector store ID '{vector_store.id}'."
     )
+
+    return vector_store.id
 
 # This component downloads PDF files from a given base URL. We will use the PDFs from my
 # personal GitHub repository which is representative of client's production knowledge base.
@@ -132,129 +136,105 @@ def docling_convert(
     embed_model_id: str,
     max_tokens: int,
     service_url: str,
-    vector_db_id: str,
+    vector_store_id: str,
 ):
-    import pathlib
-
-    from docling.datamodel.base_models import InputFormat, ConversionStatus
-    from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-    from transformers import AutoTokenizer
-    from sentence_transformers import SentenceTransformer
-    from docling.chunking import HybridChunker
-    import logging
-    from llama_stack_client import LlamaStackClient
-    import uuid
-
-    import json
-
-    _log = logging.getLogger(__name__)
-
-    # Helper functions inside the component
-    def setup_chunker_and_embedder(embed_model_id: str, max_tokens: int):
-        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)
-        embedding_model = SentenceTransformer(embed_model_id)
-        chunker = HybridChunker(
-            tokenizer=tokenizer, max_tokens=max_tokens, merge_peers=True
-        )
-        return embedding_model, chunker
-
-    def embed_text(text: str, embedding_model) -> list[float]:
-        return embedding_model.encode([text], normalize_embeddings=True).tolist()[0]
-
-    def process_and_insert_embeddings(conv_results):
-        processed_docs = 0
-
-        for conv_res in conv_results:
-            file_name = conv_res.input.file.stem
-
-            if conv_res.status != ConversionStatus.SUCCESS:
-                _log.warning(f"Conversion failed for {file_name}: {conv_res.status}")
-                continue
-
-            document = conv_res.document
-            if document is None:
-                _log.warning(f"Document conversion returned None for {file_name}")
-                continue
-
-            processed_docs += 1
-
-            # Initialize embedding model and chunker per document (or could do once outside loop)
-            embedding_model, chunker = setup_chunker_and_embedder(embed_model_id, max_tokens)
-            embedding_dim = embedding_model.get_sentence_embedding_dimension()
-
-            chunks_with_embedding = []
-
-            for chunk in chunker.chunk(dl_doc=document):
-                if chunk is None:
-                    _log.warning(f"Skipped None chunk from document {file_name}")
-                    continue
-
-                raw_chunk = chunker.contextualize(chunk)
-                if not raw_chunk or not raw_chunk.strip():
-                    _log.warning(f"Skipped empty chunk from document {file_name}")
-                    continue
-
-                try:
-                    embedding = embed_text(raw_chunk, embedding_model)
-                except Exception as e:
-                    _log.error(f"Failed to generate embedding for a chunk in {file_name}: {e}")
-                    continue
-
-                if not isinstance(embedding, list) or len(embedding) != embedding_dim:
-                    _log.warning(f"Invalid embedding dimension for chunk in {file_name}")
-                    continue
-
-                # chunk_id = str(uuid.uuid4()) --> may result in duplicates if same file/chunk is reinserted as part of cronjob
-                # derive chunk_id from the document + chunk text hash to make it duplicate-proof
-                import hashlib
-                chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()
+    import pathlib  
+    import hashlib  
+    import json  
+    import logging  
+    from typing import List  
+    
+    from docling.datamodel.base_models import InputFormat, ConversionStatus  
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions  
+    from docling.document_converter import DocumentConverter, PdfFormatOption  
+    from transformers import AutoTokenizer  
+    from sentence_transformers import SentenceTransformer  
+    from docling.chunking import HybridChunker  
+    from llama_stack_client import LlamaStackClient  
+    from llama_stack_client import RAGDocument  
+    
+    _log = logging.getLogger(__name__)  
+    
+    def setup_chunker_and_embedder(embed_model_id: str, max_tokens: int):  
+        """Initialize the custom chunker and embedding model"""  
+        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)  
+        embedding_model = SentenceTransformer(embed_model_id)  
+        chunker = HybridChunker(  
+            tokenizer=tokenizer, max_tokens=max_tokens, merge_peers=True  
+        )  
+        return embedding_model, chunker  
+    
+    def embed_text(text: str, embedding_model) -> List[float]:  
+        """Generate embedding for text using the custom model"""  
+        return embedding_model.encode([text], normalize_embeddings=True).tolist()[0]  
+    
+    def process_and_insert_with_custom_chunking(  
+        conv_results,   
+        vector_store_id: str,   
+        embed_model_id: str,  
+        max_tokens: int = 512  
+    ):  
+        """Process documents using custom chunker and embedding model"""  
+        processed_docs = 0  
+        
+        # Initialize custom chunker and embedder  
+        embedding_model, chunker = setup_chunker_and_embedder(embed_model_id, max_tokens)  
+        
+        for conv_res in conv_results:  
+            file_name = conv_res.input.file.stem  
+            
+            if conv_res.status != ConversionStatus.SUCCESS:  
+                _log.warning(f"Conversion failed for {file_name}: {conv_res.status}")  
+                continue  
                 
-                content_token_count = chunker.tokenizer.count_tokens(raw_chunk)
-
-                metadata_obj = {
-                    "chunk_id": chunk_id,
-                    "document_id": file_name,
-                    "file_name": file_name,
-                    "token_count": content_token_count,
-                }
-
-                metadata_str = json.dumps(metadata_obj)
-                metadata_token_count = chunker.tokenizer.count_tokens(metadata_str)
-                metadata_obj["metadata_token_count"] = metadata_token_count
-
-                chunks_with_embedding.append(
-                    {
-                        "chunk_metadata": metadata_obj,
-                        "chunk_id": chunk_id,
-                        "content": raw_chunk,
-                        "mime_type": "text/markdown",
-                        "embedding": embedding,
-                        "metadata": metadata_obj,
-                    }
-                )
-
-            # sanity check...only insert fully valid chunks
-            valid_chunks = [
-                c for c in chunks_with_embedding
-                if c
-                and isinstance(c.get("embedding"), list)
-                and len(c["embedding"]) == embedding_dim
-                and c.get("content") and c["content"].strip()
-                and isinstance(c.get("metadata"), dict)
-            ]
-
-            if not valid_chunks:
-                _log.warning(f"No valid chunks to insert for document {file_name}")
-                continue
-
-            try:
-                client.vector_io.insert(vector_db_id=vector_db_id, chunks=valid_chunks)
-                _log.info(f"Inserted {len(valid_chunks)} chunks for document {file_name}")
-            except Exception as e:
-                _log.error(f"Failed to insert chunks for document {file_name}: {e}")
-
-        _log.info(f"Processed {processed_docs} documents successfully.")
+            document = conv_res.document  
+            if document is None:  
+                _log.warning(f"Document conversion returned None for {file_name}")  
+                continue  
+                
+            processed_docs += 1  
+            
+            # Create RAGDocuments from custom chunks  
+            rag_documents = []  
+            
+            for chunk in chunker.chunk(dl_doc=document):  
+                if chunk is None:  
+                    continue  
+                    
+                raw_chunk = chunker.contextualize(chunk)  
+                if not raw_chunk or not raw_chunk.strip():  
+                    continue  
+                    
+                # Generate chunk_id from document + chunk text hash  
+                chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()  
+                
+                # Create RAGDocument  
+                rag_doc = RAGDocument(  
+                    document_id=chunk_id,  
+                    content=raw_chunk,  
+                    metadata={  
+                        "document_id": file_name,  
+                        "file_name": file_name,  
+                        "chunk_id": chunk_id,  
+                        "source": "docling_hybrid_chunker"  
+                    }  
+                )  
+                rag_documents.append(rag_doc)  
+            
+            # Insert using the tool runtime API  
+            if rag_documents:  
+                try:  
+                    client = LlamaStackClient(base_url=service_url)    
+                    client.tool_runtime.rag_tool.insert(  
+                        documents=rag_documents,  
+                        vector_db_id=vector_store_id,  
+                        chunk_size_in_tokens=max_tokens  
+                    )  
+                    _log.info(f"Inserted {len(rag_documents)} chunks for {file_name}")  
+                except Exception as e:  
+                    _log.error(f"Failed to insert chunks for {file_name}: {e}")  
+                    
+        _log.info(f"Processed {processed_docs} documents successfully.") 
 
     # Main logic starts here
     input_path = pathlib.Path(input_path)
@@ -292,11 +272,11 @@ def docling_convert(
         raises_on_error=True,
     )
 
-    # Initialize LlamaStack client
-    client = LlamaStackClient(base_url=service_url)
-
     # Process the conversion results and insert embeddings into the vector database
-    process_and_insert_embeddings(conv_results)
+    process_and_insert_with_custom_chunking( conv_results=conv_results,  
+        vector_store_id=vector_store_id,  
+        embed_model_id=embed_model_id,  
+        max_tokens=512)
 
 # The main pipeline definition, making docling conversion and embedding ingestion scalable and configurable
 # disabling GPU by default for broader compatibility
@@ -352,7 +332,7 @@ def docling_convert_pipeline(
                 embed_model_id=embed_model_id,
                 max_tokens=max_tokens,
                 service_url=service_url,
-                vector_db_id=vector_db_id,
+                vector_store_id=register_task.output,
             )
             convert_task.set_caching_options(False)
             convert_task.set_cpu_request("500m")
@@ -379,7 +359,7 @@ def docling_convert_pipeline(
                 embed_model_id=embed_model_id,
                 max_tokens=max_tokens,
                 service_url=service_url,
-                vector_db_id=vector_db_id,
+                vector_store_id=register_task.output,
             )
             convert_task.set_caching_options(False)
             convert_task.set_cpu_request("500m")
