@@ -1,10 +1,9 @@
 from llama_stack_client import LlamaStackClient
-from llama_stack_client import Agent, AgentEventLogger
+from llama_stack_client import Agent
 import uuid
 import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 import uvicorn
 
 # Initialize FastAPI app
@@ -32,21 +31,9 @@ def initialize_client():
     if client is None:
         client = LlamaStackClient(base_url=LLAMA_STACK_URL)
         models = client.models.list()
-        model_id = next(m for m in models if m.model_type == "llm").identifier
+        model_id = os.getenv("MODEL_ID", "gpt-5.2")
         print(f"Initialized with model: {model_id}")
-        
-        # Check if model is suitable for tool calling
-        # *********************************************************************
-        # WARNING: Using smaller models like Llama4-Scout-17B or similar WILL
-        # result in UNPREDICTABLE TOOL EXECUTION BEHAVIOR and AGENT FAILURES.
-        # For consistent and robust agentic functionalities (tool calls, sequences),
-        # it is strongly recommended to use larger models such as Llama-3.1-70B
-        # or any specialized models explicitly trained for tool usage.
-        # *********************************************************************
-        if "17B" in model_id or "Scout" in model_id:
-            print("⚠️  WARNING: Smaller models (17B) may have inconsistent tool execution behavior.")
-            print("    For production, consider using Llama-3.1-70B or larger models trained for tool use.")
-        
+                
         # Register MCP toolgroup
         try:
             client.toolgroups.register(
@@ -68,14 +55,13 @@ def query_rag_agent(prompt: str) -> str:
     rag_agent = Agent(
         client,
         model=model_id,
-        instructions="You are a helpful assistant",
+        instructions="You are a helpful assistant. Use the tool to search the knowledge base for the best answer.",
         tools=[
             {
-                "name": "builtin::rag/knowledge_search",
-                "args": {"vector_db_ids": [VECTOR_DB_ID]},
-            }, 
+                "type": "file_search",
+                "vector_store_ids": [VECTOR_DB_ID],
+            },
         ],
-        max_infer_iters=100
     )
 
     session_id = rag_agent.create_session(session_name=f"s{uuid.uuid4().hex}")
@@ -86,15 +72,25 @@ def query_rag_agent(prompt: str) -> str:
         stream=True,
     )
 
-    rag_output = []
-    for log in AgentEventLogger().log(response):
-        log.print()
-        if log.role != "inference" and log.role != "tool_execution":
-            rag_output.append(log)
+    # Process streaming response - 0.3.1 API
+    output_text = ""
+    for chunk in response:
+        if hasattr(chunk, 'event') and hasattr(chunk.event, 'event_type'):
+            event_type = chunk.event.event_type
+            
+            # Extract text from step_progress events (incremental text)
+            if event_type == "step_progress":
+                if hasattr(chunk.event, 'delta') and hasattr(chunk.event.delta, 'text'):
+                    output_text += chunk.event.delta.text
+            
+            # Extract final text from turn_completed event
+            elif event_type == "turn_completed":
+                if hasattr(chunk.event, 'final_text'):
+                    output_text = chunk.event.final_text
+                    break
 
-    if rag_output:
-        rag_results = "".join(str(x) for x in rag_output)
-        return rag_results
+    if output_text:
+        return output_text
     else:
         return "No RAG response found."
 
@@ -111,7 +107,7 @@ def query_mcp_agent(prompt: str) -> str:
     except Exception as e:
         print(f"Error listing tools: {e}")
 
-    # Create agent with the toolgroup name (not individual tool names)
+    # Create agent with MCP tool specification
     # Keep instructions minimal for smaller models
     mcp_agent = Agent(
         client,
@@ -123,8 +119,13 @@ Title: [article title]
 Link: [full view_uri URL]
 
 Show the complete URL for each article so users can easily access them.""",
-        tools=["mcp::rh-kcs-mcp"],
-        max_infer_iters=100
+        tools=[
+            {
+                "type": "mcp",
+                "server_url": MCP_ENDPOINT,
+                "server_label": "mcp::rh-kcs-mcp",
+            }
+        ],
     )
     
     print(f"Created agent with ID: {mcp_agent.agent_id if hasattr(mcp_agent, 'agent_id') else 'N/A'}")
@@ -136,7 +137,7 @@ Show the complete URL for each article so users can easily access them.""",
     enhanced_prompt = f"Find Red Hat solutions for: {prompt}"
     print(f"Prompt before calling MCP agent: {enhanced_prompt}")
 
-    # Try streaming first (more responsive)
+    # Process streaming response - 0.3.1 API
     try:
         response = mcp_agent.create_turn(
             messages=[{"role": "user", "content": enhanced_prompt}],
@@ -144,54 +145,43 @@ Show the complete URL for each article so users can easily access them.""",
             stream=True,
         )
 
-        mcp_output = []
-        assistant_messages = []
-        tool_responses = []
-        streamed_content = []
+        output_text = ""
+        tool_executions = []
         
-        # Process all logs from the agent
-        for log in AgentEventLogger().log(response):
-            log.print()
-            
-            # Collect assistant messages (complete responses)
-            if log.role == "assistant":
-                assistant_messages.append(log)
-            # Collect tool execution responses
-            elif log.role == "tool_execution":
-                tool_responses.append(log)
-            # Collect streaming content tokens (role=None)
-            elif log.role is None or log.role == "":
-                # These are streaming tokens that form the complete response
-                if hasattr(log, 'content'):
-                    streamed_content.append(str(log.content))
-            # Capture other non-inference logs
-            elif log.role != "inference":
-                mcp_output.append(log)
+        # Process streaming response directly - 0.3.1 API
+        for chunk in response:
+            if hasattr(chunk, 'event') and hasattr(chunk.event, 'event_type'):
+                event_type = chunk.event.event_type
+                
+                # Extract text from step_progress events (incremental text)
+                if event_type == "step_progress":
+                    if hasattr(chunk.event, 'delta') and hasattr(chunk.event.delta, 'text'):
+                        text = chunk.event.delta.text
+                        output_text += text
+                        print(text, end='', flush=True)
+                
+                # Extract final text from turn_completed event
+                elif event_type == "turn_completed":
+                    if hasattr(chunk.event, 'final_text'):
+                        output_text = chunk.event.final_text
+                        print(f"\n=== Turn Completed ===")
+                        break
+                    # Fallback: if final_text not available, use accumulated text
+                    elif output_text:
+                        break
 
         print(f"\n=== Response Summary ===")
-        print(f"Tool executions: {len(tool_responses)}")
-        print(f"Streamed tokens: {len(streamed_content)}")
+        print(f"Final text length: {len(output_text)} chars")
 
-        # Try to extract the final response in order of preference
-        if assistant_messages:
-            # Get the last assistant message which should have the final formatted response
-            last_message = assistant_messages[-1]
-            result = str(last_message.content) if hasattr(last_message, 'content') else str(last_message)
-            print(f"Returning assistant message ({len(result)} chars)")
-            return result
-        elif streamed_content:
-            # Reconstruct the complete response from streaming tokens
-            complete_response = "".join(streamed_content)
-            print(f"Returning streamed content ({len(complete_response)} chars)")
-            return complete_response
-        elif mcp_output:
-            mcp_results = "\n".join(str(x) for x in mcp_output)
-            print(f"Returning other output ({len(mcp_results)} chars)")
-            return mcp_results
+        if output_text:
+            return output_text
         else:
             return "No response generated. The search may have returned empty results. Try different search terms."
+            
     except Exception as e:
         print(f"Error during agent turn: {e}")
+        import traceback
+        traceback.print_exc()
         return f"Error querying MCP agent: {str(e)}"
 
 @app.on_event("startup")
@@ -209,6 +199,10 @@ async def query_agents(request: QueryRequest):
     """
     Query both RAG and MCP agents with the provided query string.
     Returns combined results from both agents.
+
+        curl -X POST "http://localhost:8000/query" \
+         -H "Content-Type: application/json" \
+         -d '{"query": "CrashLoopBackOff OpenShift pod"}'   
     """
     try:
         if not request.query or not request.query.strip():
