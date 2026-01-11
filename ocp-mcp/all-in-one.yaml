@@ -32,7 +32,10 @@ spec:
         - "8000"
         command:
         - ./kubernetes-mcp-server
-        image: quay.io/balki404/ocp-mcp-server:0.0.1
+        env:
+        - name: MCP_LOG_LEVEL
+          value: "6"        
+        image: quay.io/balki404/ocp-mcp-server:1.0.4-debug
         imagePullPolicy: Always
         name: ocp-mcp-server
         ports:
