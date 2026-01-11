@@ -294,13 +294,11 @@ def lls_agent_remediation_action(event: EventChangeEvent):
         prompt = build_sreips_prompt(event_reason, event_message, resource_kind)
         
         # Query SREIPS Agent
-        # results = query_sreips_agent(prompt)
-        # combined_results = results.get("combined_results", "No results returned from SREIPS Agent")
+        results = query_sreips_agent(prompt)
+        combined_results = results.get("combined_results", "No results returned from SREIPS Agent")
         
-        rag_results = ""
-        mcp_results = ""
         # Parse and format results
-        # rag_results, mcp_results = parse_combined_results(combined_results)
+        rag_results, mcp_results = parse_combined_results(combined_results)
         
         # Build enrichment blocks
         enrichment_blocks = [
