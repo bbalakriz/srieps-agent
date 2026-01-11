@@ -48,12 +48,17 @@ spec:
             valueFrom:
               configMapKeyRef:
                 name: sreips-agent-config
-                key: LLAMA_STACK_URL
+                key: LLAMA_STACK_URL                
           - name: MCP_ENDPOINT
             valueFrom:
               configMapKeyRef:
                 name: sreips-agent-config
                 key: MCP_ENDPOINT
+          - name: VECTOR_DB_ID
+            valueFrom:
+              configMapKeyRef:
+                name: sreips-agent-config
+                key: VECTOR_DB_ID
 ---
 apiVersion: v1
 kind: Service
@@ -96,6 +101,8 @@ metadata:
 data:
   LLAMA_STACK_URL: ""
   OCP_MCP_ENDPOINT: ""
+  MCP_TOOL_LOGGING: ""
+  MODEL_ID: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -149,6 +156,16 @@ spec:
               configMapKeyRef:
                 name: remediation-agent-config
                 key: OCP_MCP_ENDPOINT
+          - name: MCP_TOOL_LOGGING
+            valueFrom:
+              configMapKeyRef:
+                name: remediation-agent-config
+                key: MCP_TOOL_LOGGING
+          - name: MODEL_ID
+            valueFrom:
+              configMapKeyRef:
+                name: remediation-agent-config
+                key: MODEL_ID
         resources:
           requests:
             memory: "512Mi"
