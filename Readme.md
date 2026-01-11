@@ -104,7 +104,7 @@ Before running the bootstrap script, you need to configure the following in `con
 - **VLLM TLS verify** - Set to `true` or `false` for SSL verification
 
 ### SREIPS Agent
-- **Vector database ID** - Identifier for your vector database (e.g., `sreips_vector_id`)
+- **Vector database ID** - ⚠️ **Important**: In RHOAI-3 based implementation, this must be obtained **after** the data ingestion RAG pipeline completes. RHOAI-3 generates the vector store ID dynamically and no longer uses the given name. See Post-Deployment Steps below for instructions.
 
 See `config.env.template` for detailed descriptions and example values.
 
@@ -161,7 +161,33 @@ If installation fails:
 
 ## Post-Deployment Steps
 
-After the bootstrap script completes successfully, you need to update your Slack app configuration:
+After the bootstrap script completes successfully, you need to complete the following steps:
+
+### 1. Configure Vector Database ID (Required)
+
+In the new RHOAI-3 based implementation, the `VECTOR_DB_ID` must be obtained after the data ingestion RAG pipeline completes, as RHOAI-3 generates the vector store ID dynamically and no longer uses the given name.
+
+1. **Get the Vector Store ID from the Pipeline:**
+   - Navigate to your RHOAI-3 Data Science Pipelines dashboard
+   - Find the completed data ingestion RAG pipeline run
+   - Copy the generated vector store ID from the pipeline output/logs
+
+2. **Update the ConfigMap:**
+   ```bash
+   # Edit the configmap to set VECTOR_DB_ID
+   oc edit configmap sreips-agent-config -n sreips-agent
+   ```
+   - Add or update the `VECTOR_DB_ID` environment variable with the vector store ID obtained from step 1
+   - Save and exit
+
+3. **Restart the SREIPS Agent Pod:**
+   ```bash
+   # Restart the pod to pick up the new configuration
+   oc delete pod -l app=sreips-agent -n sreips-agent
+   ```
+   The pod will automatically restart with the new configuration.
+
+### 2. Update Slack App Configuration
 
 1. **Get the Remediation Agent Route URL:**
    ```bash
