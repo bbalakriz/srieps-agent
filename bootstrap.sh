@@ -194,6 +194,8 @@ check_prerequisites() {
     [ -z "${VLLM_URL:-}" ] && missing_vars+=("VLLM_URL")
     [ -z "${VLLM_TLS_VERIFY:-}" ] && missing_vars+=("VLLM_TLS_VERIFY")
     [ -z "${VLLM_API_TOKEN:-}" ] && missing_vars+=("VLLM_API_TOKEN")
+    [ -z "${OPENAI_BASE_URL:-}" ] && missing_vars+=("OPENAI_BASE_URL")
+    [ -z "${OPENAI_API_KEY:-}" ] && missing_vars+=("OPENAI_API_KEY")
     
     # SREIPS Agent variables
     [ -z "${VECTOR_DB_ID:-}" ] && missing_vars+=("VECTOR_DB_ID")
@@ -535,6 +537,7 @@ install_sreips_agent() {
         --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_URL" \
         --from-literal=MCP_ENDPOINT="$MCP_ENDPOINT" \
         --from-literal=VECTOR_DB_ID="$VECTOR_DB_ID" \
+        --from-literal=MODEL_ID="$MODEL_ID" \
         -n sreips-agent \
         --dry-run=client -o yaml | oc apply -f -
     
@@ -542,6 +545,8 @@ install_sreips_agent() {
     oc create configmap remediation-agent-config \
         --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_URL" \
         --from-literal=OCP_MCP_ENDPOINT="$OCP_MCP_ENDPOINT" \
+        --from-literal=MCP_TOOL_LOGGING="$MCP_TOOL_LOGGING" \
+        --from-literal=MODEL_ID="$MODEL_ID" \
         -n sreips-agent \
         --dry-run=client -o yaml | oc apply -f -
     
