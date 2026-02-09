@@ -52,6 +52,8 @@ def initialize_client():
 
 def query_rag_agent(prompt: str) -> str:
     """Query the RAG agent with the given prompt"""
+    print("Received prompt for RAG agent:", prompt)
+    
     rag_agent = Agent(
         client,
         model=model_id,
@@ -74,24 +76,51 @@ def query_rag_agent(prompt: str) -> str:
 
     # Process streaming response - 0.3.1 API
     output_text = ""
+    streamed_text = ""  # capture text as it streams (includes file tokens)
+    
     for chunk in response:
         if hasattr(chunk, 'event') and hasattr(chunk.event, 'event_type'):
             event_type = chunk.event.event_type
             
-            # Extract text from step_progress events (incremental text)
+            # extract text from step_progress events (incremental text)
             if event_type == "step_progress":
                 if hasattr(chunk.event, 'delta') and hasattr(chunk.event.delta, 'text'):
-                    output_text += chunk.event.delta.text
+                    text = chunk.event.delta.text
+                    streamed_text += text  # capture with file tokens
+                    print(text, end='', flush=True)
             
-            # Extract final text from turn_completed event
+            # extract final text from turn_completed event
             elif event_type == "turn_completed":
                 if hasattr(chunk.event, 'final_text'):
                     output_text = chunk.event.final_text
+                    print(f"\n\n=== RAG Turn Completed ===")
                     break
 
+    # analyze the streamed text for file references
+    print(f"\n{'='*60}")
+    print(f"RAG RESPONSE ANALYSIS")
+    print(f"{'='*60}")
+    
+    import re
+    # extract file reference tokens from streamed text (not final_text which strips them)
+    file_refs = re.findall(r'<\|file-([a-f0-9]+)\|>', streamed_text)
+    
+    if file_refs:
+        print(f"\n FILE REFERENCE TOKENS FOUND: {len(file_refs)} references")
+        print(f"These document IDs prove the LLM is citing vector database content:\n")
+        for idx, ref in enumerate(file_refs, 1):
+            print(f"  {idx}. file-{ref}")
+    else:
+        print(f"\n✗ WARNING: No file reference tokens found")
+        print(f"LLM may not be using vector database content")
+    
+    print(f"\nResponse length: {len(output_text)} chars")
+    print(f"{'='*60}\n")
+    
     if output_text:
         return output_text
     else:
+        print("No RAG response found.")
         return "No RAG response found."
 
 def query_mcp_agent(prompt: str) -> str:
