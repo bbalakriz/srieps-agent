@@ -405,17 +405,37 @@ install_llamastack() {
     
     cd "${SCRIPT_DIR}/llamastack" || exit 1
     
-    log_info "Applying OpenShift Data Science operators setup..."
+    log_info "Applying rhoai-operator.3.0.0 operator setup..."
     oc apply -f operators-setup.yaml
+
+    log_info "Waiting for operator to be installed (60 seconds)..."
+    sleep 60 
+
+    log_info "Approving rhoai-operator.3.0.0 operator install plan..."
+    INSTALL_PLAN=$(oc get installplan -n redhat-ods-operator \
+            -o jsonpath='{.items[?(@.spec.clusterServiceVersionNames[0]=="rhods-operator.3.0.0")].metadata.name}')
+
+    oc patch installplan $INSTALL_PLAN \
+        -n redhat-ods-operator \
+        --type merge \
+        --patch '{"spec":{"approved":true}}'
     
-    log_info "Waiting for operators to be installed (60 seconds)..."
-    sleep 60
+    log_info "Waiting for all relevant rhoai components to be installed (120 seconds)..."
+    sleep 120
+
+    log_info "Applying data science cluster setup..."
+    oc apply -f dsc-setup.yaml
+
+    log_info "Waiting for all dsc pods to be installed (180 seconds)..."
+    sleep 180
     
     log_info "Creating llamastack namespace..."
     oc new-project llamastack || oc project llamastack
     
     log_info "Creating llama-stack-inference-model-secret with config.env values..."
     oc create secret generic llama-stack-inference-model-secret \
+        --from-literal=OPENAI_BASE_URL="$OPENAI_BASE_URL" \
+        --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
         --from-literal=INFERENCE_MODEL="$INFERENCE_MODEL" \
         --from-literal=VLLM_URL="$VLLM_URL" \
         --from-literal=VLLM_TLS_VERIFY="$VLLM_TLS_VERIFY" \

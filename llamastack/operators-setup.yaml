@@ -18,52 +18,8 @@ metadata:
   namespace: redhat-ods-operator
 spec:
   channel: fast-3.x
-  installPlanApproval: Automatic
+  installPlanApproval: Manual
   name: rhods-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
   startingCSV: rhods-operator.3.0.0
----
-apiVersion: datasciencecluster.opendatahub.io/v2
-kind: DataScienceCluster
-metadata:
-  labels:
-    app.kubernetes.io/name: datasciencecluster
-  name: default-dsc
-spec:
-  components:
-    aipipelines:
-      argoWorkflowsControllers:
-        managementState: Managed
-      managementState: Managed
-    dashboard:
-      managementState: Managed
-    feastoperator:
-      managementState: Removed
-    kserve:
-      managementState: Managed
-      nim:
-        managementState: Removed
-      rawDeploymentServiceConfig: Headless
-    kueue:
-      defaultClusterQueueName: default
-      defaultLocalQueueName: default
-      managementState: Removed
-    llamastackoperator:
-      managementState: Managed
-    modelregistry:
-      managementState: Removed
-      registriesNamespace: rhoai-model-registries
-    ray:
-      managementState: Removed
-    trainingoperator:
-      managementState: Removed
-    trustyai:
-      eval:
-        lmeval:
-          permitCodeExecution: deny
-          permitOnline: deny
-      managementState: Removed
-    workbenches:
-      managementState: Managed
-      workbenchNamespace: rhods-notebooks
