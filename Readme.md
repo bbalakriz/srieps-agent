@@ -43,7 +43,7 @@ Before deployment, you need to create a Slack Bot/App for SREIPS notifications:
 1. In your app settings, go to **Interactivity & Shortcuts**
 2. Toggle **Interactivity** to **On**
 3. Set the **Request URL** to: `<remediation-agent-route-url>/remediate`
-   - Example: `https://sreips-remediation-agent-sreips-agent.apps.your-cluster.com/remediate`
+   - Example: `https://remediation-agent-sreips-agent.apps.your-cluster.com/remediate`
    - To get the route URL after deployment, run:
      ```bash
      oc get route sreips-remediation-agent -n sreips-agent -o jsonpath='{.spec.host}'
