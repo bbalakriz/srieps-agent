@@ -255,3 +255,9 @@ Tests the automated remediation feature for resource quota violations. This will
 4. Send a Slack notification with an interactive "Remediate" button
 5. Click the button to trigger automated quota adjustment via the remediation-agent
 
+## Using Mattermost instead of Slack
+```
+cd mattermost
+oc apply -f mm-all-in-one.yaml
+```
+

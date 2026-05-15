@@ -1,0 +1,331 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: mattermost-team-edition
+  name: mattermost-team-edition
+  namespace: mattermost
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mattermost-team-edition
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        checksum/config: cb69d50bd793446d8b35301aaca884ddd6b179b7267a58371a7dc939ef57f136
+      creationTimestamp: null
+      labels:
+        app.kubernetes.io/name: mattermost-team-edition
+    spec:
+      containers:
+      - env:
+        - name: MM_CONFIG
+          valueFrom:
+            secretKeyRef:
+              key: mattermost.dbsecret
+              name: mattermost-team-edition-mattermost-dbsecret
+        envFrom:
+        - secretRef:
+            name: mattermost-team-edition-config
+        image: mattermost/mattermost-team-edition:10.11.2@sha256:b8bd1246cb3a92557891254a4322276206ce12451d3c8581fe2ead4786fd2673
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /api/v4/system/ping
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 1
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: mattermost-team-edition
+        ports:
+        - containerPort: 8065
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /api/v4/system/ping
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        startupProbe:
+          failureThreshold: 30
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /mattermost/config
+          name: mattermost-config
+        - mountPath: /mattermost/data
+          name: mattermost-data
+        - mountPath: /mattermost/client/plugins
+          name: mattermost-plugins
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until curl --max-time 10 http://mattermost-team-edition-mysql:3306; do echo
+          waiting for mattermost-team-edition-mysql; sleep 5; done;
+        image: appropriate/curl:latest
+        imagePullPolicy: IfNotPresent
+        name: init-mysql
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: mattermost-config
+      - name: mattermost-data
+        persistentVolumeClaim:
+          claimName: mattermost-team-edition
+      - name: mattermost-plugins
+        persistentVolumeClaim:
+          claimName: mattermost-team-edition-plugins
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: mattermost-team-edition-mysql
+    release: mattermost-team-edition
+  name: mattermost-team-edition-mysql
+  namespace: mattermost
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: mattermost-team-edition-mysql
+      release: mattermost-team-edition
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: mattermost-team-edition-mysql
+        release: mattermost-team-edition
+    spec:
+      containers:
+      - env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: mysql-root-password
+              name: mattermost-team-edition-mysql
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: mysql-password
+              name: mattermost-team-edition-mysql
+        - name: MYSQL_USER
+          value: mattermost
+        - name: MYSQL_DATABASE
+          value: mattermost
+        image: mysql:8.0.18
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}
+          failureThreshold: 3
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: mattermost-team-edition-mysql
+        ports:
+        - containerPort: 3306
+          name: mysql
+          protocol: TCP
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}
+          failureThreshold: 3
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: data
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - rm
+        - -fr
+        - /var/lib/mysql/lost+found
+        image: busybox:1.31.1
+        imagePullPolicy: IfNotPresent
+        name: remove-lost-found
+        resources:
+          requests:
+            cpu: 10m
+            memory: 10Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: data
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: mattermost-team-edition-mysql
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  annotations:
+    haproxy.router.openshift.io/timeout: 4m
+    openshift.io/host.generated: "true"
+  labels:
+    app.kubernetes.io/name: mattermost-team-edition
+  name: mattermost-team-edition
+  namespace: mattermost
+spec:
+  host: mattermost-team-edition-mattermost.apps.cluster-9rvlq.9rvlq.sandbox5438.opentlc.com
+  port:
+    targetPort: mattermost-team-edition
+  tls:
+    termination: edge
+  to:
+    kind: Service
+    name: mattermost-team-edition
+    weight: 100
+  wildcardPolicy: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: mattermost-team-edition
+  name: mattermost-team-edition
+  namespace: mattermost
+spec:
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: mattermost-team-edition
+    port: 8065
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: mattermost-team-edition
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: mattermost-team-edition-mysql
+    release: mattermost-team-edition
+  name: mattermost-team-edition-mysql
+  namespace: mattermost
+spec:
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+  selector:
+    app: mattermost-team-edition-mysql
+---
+apiVersion: v1
+data:
+  run.sh: |-
+    #!/usr/bin/env bats
+    @test "Testing Mattermost is accessible" {
+      url="http://mattermost-team-edition.mattermost.svc.cluster.local:8065"
+      code=$(wget --server-response --spider --timeout 10 --tries 1 ${url} 2>&1 | awk '/^  HTTP/{print $2}')
+      [ "$code" == "200" ]
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: mattermost-team-edition
+  name: mattermost-team-edition-tests
+  namespace: mattermost
+---
+apiVersion: v1
+data:
+  MM_PLUGINSETTINGS_CLIENTDIRECTORY: Li9jbGllbnQvcGx1Z2lucw==
+kind: Secret
+metadata:
+  labels:
+    app.kubernetes.io/name: mattermost-team-edition    helm.sh/chart: mattermost-team-edition-6.6.83
+  name: mattermost-team-edition-config
+  namespace: mattermost
+type: Opaque
+---
+apiVersion: v1
+data:
+  # Database connection string in base64 format
+  # Format: mysql://username:password@tcp(mattermost-team-edition-mysql:3306)/mattermost?charset=utf8mb4,utf8&readTimeout=30s&writeTimeout=30s
+  # Encode the entire connection string with: echo -n 'your-connection-string' | base64
+  mattermost.dbsecret: <<your-value>>
+kind: Secret
+metadata:
+  labels:
+    app.kubernetes.io/name: mattermost-team-edition
+  name: mattermost-team-edition-mattermost-dbsecret
+  namespace: mattermost
+type: Opaque
+{}
+---
+apiVersion: v1
+data:
+  # MySQL user password in base64 format
+  # Encode with: echo -n 'your-password' | base64
+  mysql-password: <<your-value>>
+  # MySQL root password in base64 format
+  # Encode with: echo -n 'your-password' | base64
+  mysql-root-password: <<your-value>>
+kind: Secret
+metadata:
+  labels:
+    app: mattermost-team-edition-mysql
+    release: mattermost-team-edition
+  name: mattermost-team-edition-mysql
+  namespace: mattermost
+type: Opaque
