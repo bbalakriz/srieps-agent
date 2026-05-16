@@ -339,17 +339,46 @@ install_sreips_core() {
     log_info "Creating sreips-core namespace..."
     oc new-project sreips-core || oc project sreips-core
     
+    log_info "Applying sreips-setup.yaml (excluding sreips-playbooks-config-secret)..."
+    # apply setup first so sreips-runner-service-account exists before we
+    # generate the Prometheus token and build the config secret
+    cat sreips-setup.yaml | awk '
+        BEGIN { 
+            RS="---"
+            in_secret=0
+        }
+        {
+            if ($0 ~ /name: sreips-playbooks-config-secret/ && $0 ~ /kind: Secret/) {
+                in_secret=1
+            } else {
+                in_secret=0
+            }
+            if (!in_secret && NF > 0) {
+                print "---"
+                print $0
+            }
+        }
+    ' | oc apply -f -
+    
+    log_info "Granting cluster-monitoring-view to sreips-runner-service-account..."
+    oc adm policy add-cluster-role-to-user cluster-monitoring-view \
+        -z sreips-runner-service-account -n sreips-core
+    
+    log_info "Generating Prometheus auth token (1-year duration)..."
+    PROMETHEUS_TOKEN=$(oc create token sreips-runner-service-account -n sreips-core --duration=8760h)
+    log_success "Prometheus auth token generated"
+    
     log_info "Creating sreips-playbooks-config-secret with values from config.env..."
-    # Read the playbooks config YAML, update values, and base64 encode BEFORE applying sreips-setup.yaml
     if [ -f "sreips-playbooks-config-secret.yaml" ]; then
         log_info "Processing sreips-playbooks-config-secret.yaml..."
         
-        # Create a temporary file with updated values
+        # substitute all credentials and the generated Prometheus token in one pass
         sed -e "s|api_key:.*|api_key: ${SLACK_API_KEY}|g" \
             -e "s|slack_channel:.*|slack_channel: ${SLACK_CHANNEL}|g" \
             -e "s|signing_key:.*|signing_key: \"${SIGNING_KEY}\"|g" \
             -e "s|cluster_name:.*|cluster_name: ${CLUSTER_NAME}|g" \
             -e "s|clusterName:.*|clusterName: ${CLUSTER_NAME}|g" \
+            -e "s|prometheus_auth: \"Bearer <INSERT_YOUR_TOKEN_HERE>\"|prometheus_auth: \"Bearer ${PROMETHEUS_TOKEN}\"|g" \
             sreips-playbooks-config-secret.yaml > /tmp/sreips-playbooks-config-updated.yaml
         
         # when Mattermost is enabled, substitute the bot token, token_id and channel
@@ -372,7 +401,6 @@ install_sreips_core() {
             PLAYBOOKS_CONFIG_B64=$(base64 --wrap=0 < /tmp/sreips-playbooks-config-updated.yaml)
         fi
         
-        # Create the secret with updated configuration FIRST, before applying sreips-setup.yaml
         cat <<EOF | oc apply -f -
 apiVersion: v1
 kind: Secret
@@ -384,44 +412,18 @@ data:
   active_playbooks.yaml: ${PLAYBOOKS_CONFIG_B64}
 EOF
         
-        # Clean up temp file
         rm -f /tmp/sreips-playbooks-config-updated.yaml
         
         if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
-            log_success "Created sreips-playbooks-config-secret with Slack and Mattermost credentials, signing key, and cluster name"
+            log_success "Created sreips-playbooks-config-secret with Slack, Mattermost, Prometheus auth, signing key, and cluster name"
         else
-            log_success "Created sreips-playbooks-config-secret with Slack API key, channel, signing key, and cluster name"
+            log_success "Created sreips-playbooks-config-secret with Slack, Prometheus auth, signing key, and cluster name"
         fi
     else
         log_warning "sreips-playbooks-config-secret.yaml not found"
     fi
     
-    log_info "Applying sreips-setup.yaml (excluding sreips-playbooks-config-secret which we already created)..."
-    # Split sreips-setup.yaml into individual resources and skip sreips-playbooks-config-secret
-    cat sreips-setup.yaml | awk '
-        BEGIN { 
-            RS="---"
-            in_secret=0
-        }
-        {
-            # Check if this resource is the problematic secret
-            if ($0 ~ /name: sreips-playbooks-config-secret/ && $0 ~ /kind: Secret/) {
-                in_secret=1
-            } else {
-                in_secret=0
-            }
-            
-            # Print the resource if it is not the problematic secret
-            if (!in_secret && NF > 0) {
-                print "---"
-                print $0
-            }
-        }
-    ' | oc apply -f -
-    
-
-    
-    log_info "Restarting sreips-runner deployment to pick up updated secrets..."
+    log_info "Restarting sreips-runner deployment to pick up the config secret..."
     oc rollout restart deployment/sreips-runner -n sreips-core
     oc rollout status deployment/sreips-runner -n sreips-core --timeout=300s
     
