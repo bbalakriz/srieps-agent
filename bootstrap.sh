@@ -4,12 +4,20 @@
 # SREIPS Master Bootstrap Script
 # ==============================================================================
 # This script orchestrates the installation of all SREIPS components in sequence:
-# 1. sreips-core
-# 2. minio
-# 3. ocp-mcp
-# 4. rh-kcs-mcp
-# 5. llamastack
-# 6. sreips-agent (including remediation-agent)
+# 1. prerequisites check
+# 2. mattermost (optional - only when MATTERMOST_ENABLED=true in config.env)
+# 3. sreips-core
+# 4. minio
+# 5. ocp-mcp
+# 6. rh-kcs-mcp
+# 7. llamastack
+# 8. sreips-agent (including remediation-agent)
+#
+# Mattermost is deployed before sreips-core because sreips-core needs the
+# Mattermost bot token in its playbooks config secret. After Mattermost is
+# deployed the script pauses so the bot can be created in the UI and the
+# token saved to config.env - exactly like how Slack tokens are pre-configured
+# before the bootstrap runs, except Mattermost is self-hosted and deployed here.
 #
 # Prerequisites:
 # - OpenShift CLI (oc) installed and logged in
@@ -200,6 +208,12 @@ check_prerequisites() {
     # SREIPS Agent variables
     [ -z "${VECTOR_DB_ID:-}" ] && missing_vars+=("VECTOR_DB_ID")
     
+    # Mattermost variables (only required when MATTERMOST_ENABLED=true)
+    if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
+        [ -z "${MATTERMOST_MYSQL_ROOT_PASSWORD:-}" ] && missing_vars+=("MATTERMOST_MYSQL_ROOT_PASSWORD")
+        [ -z "${MATTERMOST_MYSQL_PASSWORD:-}" ] && missing_vars+=("MATTERMOST_MYSQL_PASSWORD")
+    fi
+    
     if [ ${#missing_vars[@]} -gt 0 ]; then
         log_error "Missing required configuration variables:"
         for var in "${missing_vars[@]}"; do
@@ -216,8 +230,109 @@ check_prerequisites() {
 # Module Installation Functions
 # ==============================================================================
 
+install_mattermost() {
+    log_step "2: Installing Mattermost (Optional)"
+    
+    cd "${SCRIPT_DIR}/mattermost" || exit 1
+    
+    log_info "Creating mattermost namespace..."
+    oc new-project mattermost 2>/dev/null || oc project mattermost
+    
+    log_info "Creating MySQL secret with credentials from config.env..."
+    oc create secret generic mattermost-team-edition-mysql \
+        --from-literal=mysql-root-password="${MATTERMOST_MYSQL_ROOT_PASSWORD}" \
+        --from-literal=mysql-password="${MATTERMOST_MYSQL_PASSWORD}" \
+        -n mattermost \
+        --dry-run=client -o yaml | oc apply -f -
+    
+    log_info "Creating Mattermost DB connection secret..."
+    # connection string uses the mattermost db user (hardcoded as 'mattermost' in the mysql deployment)
+    DB_CONN_STR="mysql://mattermost:${MATTERMOST_MYSQL_PASSWORD}@tcp(mattermost-team-edition-mysql:3306)/mattermost?charset=utf8mb4,utf8&readTimeout=30s&writeTimeout=30s"
+    if base64 --wrap 2>&1 | grep -q "invalid option"; then
+        DB_CONN_B64=$(echo -n "${DB_CONN_STR}" | base64 | tr -d '\n')
+    else
+        DB_CONN_B64=$(echo -n "${DB_CONN_STR}" | base64 --wrap=0)
+    fi
+    cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mattermost-team-edition-mattermost-dbsecret
+  namespace: mattermost
+type: Opaque
+data:
+  mattermost.dbsecret: ${DB_CONN_B64}
+EOF
+    
+    log_info "Applying Mattermost manifests (skipping placeholder secret resources)..."
+    # the two secrets with <<your-value>> placeholders are skipped here because
+    # we already created them above with real values from config.env
+    cat mm-all-in-one.yaml | awk '
+        BEGIN { RS="---"; in_secret=0 }
+        {
+            if (($0 ~ /name: mattermost-team-edition-mattermost-dbsecret/ ||
+                 $0 ~ /name: mattermost-team-edition-mysql/) && $0 ~ /kind: Secret/) {
+                in_secret=1
+            } else {
+                in_secret=0
+            }
+            if (!in_secret && NF > 0) {
+                print "---"
+                print $0
+            }
+        }
+    ' | oc apply -f -
+    
+    log_info "Waiting for MySQL pod to be ready..."
+    wait_for_pod "mattermost" "app=mattermost-team-edition-mysql" 300
+    
+    log_info "Waiting for Mattermost pod to be ready..."
+    wait_for_pod "mattermost" "app.kubernetes.io/name=mattermost-team-edition" 300
+    
+    log_info "Capturing Mattermost route..."
+    MM_ROUTE=$(oc get route mattermost-team-edition -n mattermost -o jsonpath='{.spec.host}')
+    export MATTERMOST_URL="https://${MM_ROUTE}"
+    log_success "Mattermost URL: $MATTERMOST_URL"
+    
+    # if the bot token is already in config.env (re-run scenario) skip the pause
+    if [ -n "${MATTERMOST_BOT_TOKEN:-}" ] && [ -n "${MATTERMOST_BOT_TOKEN_ID:-}" ]; then
+        log_success "Mattermost bot token already configured in config.env, skipping setup prompt"
+        log_success "Mattermost installation completed"
+        return 0
+    fi
+    
+    echo ""
+    log_warning "ACTION REQUIRED: Mattermost bot setup"
+    log_info "Mattermost is now running at: $MATTERMOST_URL"
+    log_info "Complete these steps in the Mattermost UI, then update config.env:"
+    log_info "  1. Log in and go to System Console > Integrations > Bot Accounts"
+    log_info "  2. Enable bot account creation and save"
+    log_info "  3. Go to Integrations > Bot Accounts > Add Bot Account"
+    log_info "  4. Create the bot (role: System Admin, postall permission enabled)"
+    log_info "  5. Copy the Token and Token ID shown on the success screen"
+    log_info "  6. Invite the bot to your team and to the ${MATTERMOST_CHANNEL:-sreips-helper} channel"
+    log_info "  7. Add to config.env:"
+    log_info "       export MATTERMOST_BOT_TOKEN=\"<your-token>\""
+    log_info "       export MATTERMOST_BOT_TOKEN_ID=\"<your-token-id>\""
+    log_info "  See Readme.md for the full step-by-step bot setup guide"
+    echo ""
+    read -r -p "Press Enter once config.env is updated with the Mattermost bot token to continue..."
+    
+    # re-source config.env to pick up the newly added token values
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+    
+    if [ -z "${MATTERMOST_BOT_TOKEN:-}" ] || [ -z "${MATTERMOST_BOT_TOKEN_ID:-}" ]; then
+        log_error "MATTERMOST_BOT_TOKEN and MATTERMOST_BOT_TOKEN_ID must be set in config.env"
+        log_error "Please set both values and re-run the bootstrap"
+        exit 1
+    fi
+    
+    log_success "Mattermost installation completed"
+}
+
 install_sreips_core() {
-    log_step "2: Installing SREIPS Core"
+    log_step "3: Installing SREIPS Core"
     
     cd "${SCRIPT_DIR}/sreips-core" || exit 1
     
@@ -236,6 +351,17 @@ install_sreips_core() {
             -e "s|cluster_name:.*|cluster_name: ${CLUSTER_NAME}|g" \
             -e "s|clusterName:.*|clusterName: ${CLUSTER_NAME}|g" \
             sreips-playbooks-config-secret.yaml > /tmp/sreips-playbooks-config-updated.yaml
+        
+        # when Mattermost is enabled, substitute the bot token, token_id and channel
+        # into the mattermost_sink section of the playbooks config
+        if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
+            log_info "Substituting Mattermost bot token into playbooks config..."
+            sed -e "s|    token: \"[^\"]*\"|    token: \"${MATTERMOST_BOT_TOKEN}\"|g" \
+                -e "s|    token_id: \"[^\"]*\"|    token_id: \"${MATTERMOST_BOT_TOKEN_ID}\"|g" \
+                -e "s|    channel: \"[^\"]*\"|    channel: \"${MATTERMOST_CHANNEL:-sreips-helper}\"|g" \
+                /tmp/sreips-playbooks-config-updated.yaml > /tmp/sreips-playbooks-config-mm.yaml
+            mv /tmp/sreips-playbooks-config-mm.yaml /tmp/sreips-playbooks-config-updated.yaml
+        fi
         
         # Base64 encode the updated config (cross-platform: works on both macOS and Linux)
         if base64 --wrap 2>&1 | grep -q "invalid option"; then
@@ -261,7 +387,11 @@ EOF
         # Clean up temp file
         rm -f /tmp/sreips-playbooks-config-updated.yaml
         
-        log_success "Created sreips-playbooks-config-secret with Slack API key, channel, signing key, and cluster name"
+        if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
+            log_success "Created sreips-playbooks-config-secret with Slack and Mattermost credentials, signing key, and cluster name"
+        else
+            log_success "Created sreips-playbooks-config-secret with Slack API key, channel, signing key, and cluster name"
+        fi
     else
         log_warning "sreips-playbooks-config-secret.yaml not found"
     fi
@@ -305,7 +435,7 @@ EOF
 }
 
 install_minio() {
-    log_step "3: Installing MinIO"
+    log_step "4: Installing MinIO"
     
     cd "${SCRIPT_DIR}/minio" || exit 1
     
@@ -347,7 +477,7 @@ install_minio() {
 }
 
 install_ocp_mcp() {
-    log_step "4: Installing OpenShift MCP Server"
+    log_step "5: Installing OpenShift MCP Server"
     
     cd "${SCRIPT_DIR}/ocp-mcp" || exit 1
     
@@ -369,7 +499,7 @@ install_ocp_mcp() {
 }
 
 install_rh_kcs_mcp() {
-    log_step "5: Installing Red Hat KCS MCP Server"
+    log_step "6: Installing Red Hat KCS MCP Server"
     
     cd "${SCRIPT_DIR}/rh-kcs-mcp" || exit 1
     
@@ -401,7 +531,7 @@ install_rh_kcs_mcp() {
 }
 
 install_llamastack() {
-    log_step "6: Installing LlamaStack"
+    log_step "7: Installing LlamaStack"
     
     cd "${SCRIPT_DIR}/llamastack" || exit 1
     
@@ -542,7 +672,7 @@ install_llamastack() {
 }
 
 install_sreips_agent() {
-    log_step "7: Installing SREIPS Agent and Remediation Agent"
+    log_step "8: Installing SREIPS Agent and Remediation Agent"
     
     cd "${SCRIPT_DIR}/sreips-agent" || exit 1
     
@@ -604,10 +734,22 @@ install_sreips_agent() {
 main() {
     log_step "SREIPS Master Bootstrap Script"
     log_info "Starting installation of all SREIPS components..."
-    log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, llamastack, sreips-agent, remediation-agent"
     
-    # Check prerequisites
+    # check_prerequisites sources config.env, making MATTERMOST_ENABLED available
     check_prerequisites
+    
+    # now config.env is sourced - log the component list and sequence
+    if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
+        log_info "This process will install: mattermost, sreips-core, minio, ocp-mcp, rh-kcs-mcp, llamastack, sreips-agent, remediation-agent"
+    else
+        log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, llamastack, sreips-agent, remediation-agent"
+    fi
+    
+    # deploy Mattermost before sreips-core so the bot token is available
+    # when the sreips-core playbooks config secret is created
+    if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
+        install_mattermost
+    fi
     
     # Install components in sequence
     install_sreips_core
@@ -618,7 +760,7 @@ main() {
     install_sreips_agent
     
     # Final summary
-    log_step "Installation Complete! 🎉"
+    log_step "Installation Complete!"
     log_success "All SREIPS components have been successfully installed"
     echo ""
     log_info "Component URLs:"
@@ -627,6 +769,9 @@ main() {
     log_info "  - LlamaStack: $LLAMA_STACK_URL"
     log_info "  - RH KCS MCP Server: $MCP_ENDPOINT"
     log_info "  - OCP MCP Server: $OCP_MCP_ENDPOINT"
+    if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
+        log_info "  - Mattermost: $MATTERMOST_URL"
+    fi
     echo ""
     log_info "You can now test the SREIPS agent with:"
     echo "  curl -X POST $SREIPS_AGENT_URL/query \\"

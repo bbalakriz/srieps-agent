@@ -223,7 +223,6 @@ metadata:
   name: mattermost-team-edition
   namespace: mattermost
 spec:
-  host: mattermost-team-edition-mattermost.apps.cluster-9rvlq.9rvlq.sandbox5438.opentlc.com
   port:
     targetPort: mattermost-team-edition
   tls:

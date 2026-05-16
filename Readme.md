@@ -58,7 +58,81 @@ Before deployment, you need to create a Slack Bot/App for SREIPS notifications:
 2. In the channel, type `/invite @SREIPS Bot` (or your bot name)
 3. The channel name you use here is your `SLACK_CHANNEL` for `config.env`
 
-### 2. Configure your environment
+### 2. Set up Mattermost Integration (Optional Alternative to Slack)
+
+Mattermost is a self-hosted messaging alternative to Slack. When `MATTERMOST_ENABLED=true` is set in `config.env`, the bootstrap script handles the Mattermost deployment automatically as step 2 (before sreips-core), because the Mattermost bot token must be available when sreips-core's playbooks config secret is created. This mirrors how Slack requires its bot token to be pre-configured before the bootstrap runs, except that Mattermost itself is deployed by the bootstrap.
+
+#### Step 0: Configure config.env for Mattermost
+
+Before running `./bootstrap.sh`, update `config.env` with the Mattermost database credentials:
+
+```bash
+export MATTERMOST_ENABLED="true"
+export MATTERMOST_MYSQL_ROOT_PASSWORD="your-strong-root-password"
+export MATTERMOST_MYSQL_PASSWORD="your-mattermost-db-password"
+export MATTERMOST_CHANNEL="sreips-helper"
+# leave these blank - the bootstrap will prompt you to fill them in after deploying
+export MATTERMOST_BOT_TOKEN=""
+export MATTERMOST_BOT_TOKEN_ID=""
+```
+
+Then run `./bootstrap.sh`. The script will deploy Mattermost, wait for it to be ready, print the URL and then pause with instructions to create the bot in the Mattermost UI. Once you update `config.env` with the bot token and press Enter, the bootstrap continues with the remaining components.
+
+#### Step 1: Enable Bot Account Creation
+
+1. Log in to Mattermost using an account with **System Admin** privileges
+2. Click the **Product/Main Menu** icon (top-left corner, usually a grid or ☰ icon) and go to **System Console**
+3. On the left navigation panel, scroll down to **Integrations** and select **Bot Accounts** (or Integration Management)
+4. Set **Enable Bot Account Creation** to **true**
+5. Click **Save**
+
+#### Step 2: Create the Bot and Get the Tokens
+
+1. Click the top-left menu again to leave the System Console, then go to **Integrations > Bot Accounts**
+2. Click the **Add Bot Account** button
+3. Fill in the details:
+   - **Username**: e.g., `sreips-bot` (Must begin with a letter, and contain between 3 to 22 lowercase characters/numbers)
+   - **Display Name / Description**: Enter a recognizable name
+   - **Role**: To ensure it can post seamlessly to both public and private channels without requiring team ID routing, change the role to **System Admin**
+   - **Additional Permissions**: Select the option to allow the bot to **post to all Mattermost channels** (the postall permission)
+4. Click **Create Bot Account**
+
+**CRITICAL**: The next screen will display "Setup Successful" and show a long Token and a Token ID.
+- **Copy both values immediately and save them to a secure text file**
+- Mattermost will only show the main token this one time
+- If you close this screen without copying it, you will have to generate a new token
+
+#### Step 3: Add the Bot to Your Mattermost Team
+
+Before a bot can join a channel, it first needs to be invited to the overarching Mattermost "Team":
+
+1. Navigate back to your main Mattermost chat interface
+2. Click on your team name at the top-left corner and select **Invite People** from the dropdown menu
+3. Select the option to **Invite Members**
+4. In the search box, type the username of the bot you just created
+5. Select the bot and click **Invite Members** (or **Invite**)
+   - The bot is now officially part of your Mattermost team workspace
+
+#### Step 4: Create the Channel and Invite the Bot
+
+Finally, get the bot into the specific channel where you want SREIPS to send alerts:
+
+1. In the left-hand sidebar of Mattermost, click the **+** icon next to the "Channels" header and select **Create New Channel**
+2. Name the channel (e.g., `sreips-helper`) and choose whether it should be **Public** or **Private**, then click **Create**
+3. Once you are inside the newly created channel, click the channel's name at the top of the screen to open the channel menu
+4. Select **Add Members**
+5. Search for your bot's username, select it, and click **Add**
+
+**You are now completely finished with the Mattermost UI side.** Add the token and token_id you saved in Step 2 to `config.env`:
+
+```bash
+export MATTERMOST_BOT_TOKEN="<your-token>"
+export MATTERMOST_BOT_TOKEN_ID="<your-token-id>"
+```
+
+Then press Enter in the bootstrap terminal to continue. The bootstrap will automatically substitute these values into the `sreips-playbooks-config-secret.yaml` before applying it to the cluster. No manual YAML editing required.
+
+### 4. Configure your environment
 
 ```bash
 # Copy the configuration template
@@ -69,7 +143,7 @@ cp config.env.template config.env
 vim config.env
 ```
 
-### 3. Run the master bootstrap script
+### 5. Run the master bootstrap script
 
 ```bash
 ./bootstrap.sh
@@ -117,15 +191,16 @@ See `config.env.template` for detailed descriptions and example values.
 
 ## Component Overview
 
-The SREIPS platform consists of 7 main components that are installed in sequence:
+The SREIPS platform consists of 7 main components (plus an optional Mattermost component) that are installed in sequence:
 
-1. **sreips-core**: Core SREIPS monitoring and automation framework based on Robusta
-2. **minio**: Object storage for data pipeline artifacts
-3. **ocp-mcp**: OpenShift MCP server that provides cluster management capabilities for the remediation agent
-4. **rh-kcs-mcp**: Red Hat Knowledgebase Content Services MCP server for KB access
-5. **llamastack**: AI/ML pipeline infrastructure with Milvus vector database
-6. **sreips-agent**: Main SREIPS agent that orchestrates troubleshooting workflows
-7. **remediation-agent**: Automated remediation agent for self-healing capabilities with interactive Slack buttons
+1. **mattermost** (optional): Self-hosted messaging platform, an alternative to Slack for SREIPS notifications. Deployed before sreips-core because the bot token is required by the sreips-core configuration.
+2. **sreips-core**: Core SREIPS monitoring and automation framework based on Robusta
+3. **minio**: Object storage for data pipeline artifacts
+4. **ocp-mcp**: OpenShift MCP server that provides cluster management capabilities for the remediation agent
+5. **rh-kcs-mcp**: Red Hat Knowledgebase Content Services MCP server for KB access
+6. **llamastack**: AI/ML pipeline infrastructure with Milvus vector database
+7. **sreips-agent**: Main SREIPS agent that orchestrates troubleshooting workflows
+8. **remediation-agent**: Automated remediation agent for self-healing capabilities with interactive Slack or Mattermost buttons
 
 For detailed architecture and data flow diagrams, see [ARCHITECTURE.md](https://docs.google.com/presentation/d/1mDIUx_LKE_zHQxduarDN1AXC6TIuSUj9XT8eVc2P2AQ)
 
@@ -139,15 +214,16 @@ source config.env
 source bootstrap.sh
 
 # Run individual installation functions
-install_sreips_core    # Step 2: Core monitoring framework
-install_minio          # Step 3: Object storage
-install_ocp_mcp        # Step 4: OpenShift MCP server for remediation agent
-install_rh_kcs_mcp     # Step 5: Red Hat KCS MCP server
-install_llamastack     # Step 6: AI/ML pipeline infrastructure
-install_sreips_agent   # Step 7: SREIPS and Remediation agents
+install_mattermost     # Step 2: Mattermost (optional - only when MATTERMOST_ENABLED=true)
+install_sreips_core    # Step 3: Core monitoring framework
+install_minio          # Step 4: Object storage
+install_ocp_mcp        # Step 5: OpenShift MCP server for remediation agent
+install_rh_kcs_mcp     # Step 6: Red Hat KCS MCP server
+install_llamastack     # Step 7: AI/ML pipeline infrastructure
+install_sreips_agent   # Step 8: SREIPS and Remediation agents
 ```
 
-Note: Manual deployment requires that you run steps in sequence as later components depend on earlier ones. The remediation agent specifically requires the OCP MCP server (step 4) to perform cluster operations.
+Note: Manual deployment requires that you run steps in sequence as later components depend on earlier ones. If using Mattermost, it must be installed before sreips-core so the bot token is available when the playbooks config secret is created. The remediation agent specifically requires the OCP MCP server (step 5) to perform cluster operations.
 
 ## Troubleshooting
 
@@ -254,10 +330,3 @@ Tests the automated remediation feature for resource quota violations. This will
 3. Trigger SREIPS to detect the quota violation
 4. Send a Slack notification with an interactive "Remediate" button
 5. Click the button to trigger automated quota adjustment via the remediation-agent
-
-## Using Mattermost instead of Slack
-```
-cd mattermost
-oc apply -f mm-all-in-one.yaml
-```
-
