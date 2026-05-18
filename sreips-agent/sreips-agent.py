@@ -2,6 +2,7 @@ from llama_stack_client import LlamaStackClient
 from llama_stack_client import Agent
 import uuid
 import os
+import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
@@ -237,9 +238,10 @@ async def query_agents(request: QueryRequest):
         if not request.query or not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Query both agents
-        rag_results = query_rag_agent(request.query)
-        mcp_results = query_mcp_agent(request.query)
+        # run blocking sync functions in a thread pool so the event loop
+        # stays free to serve liveness probes during long LlamaStack calls
+        rag_results = await asyncio.to_thread(query_rag_agent, request.query)
+        mcp_results = await asyncio.to_thread(query_mcp_agent, request.query)
         
         # Combine results
         combined_results = f"=== RAG Results ===\n{rag_results}\n\n=== MCP Results ===\n{mcp_results}"

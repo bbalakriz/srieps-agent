@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: sreips-agent
-        image: quay.io/balki404/sreips-agent:rhoai-3
+        image: quay.io/balki404/sreips-agent:rhoai-3u14
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -34,7 +34,7 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
-          failureThreshold: 3
+          failureThreshold: 6
         readinessProbe:
           httpGet:
             path: /
