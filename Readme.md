@@ -172,7 +172,7 @@ Before running the bootstrap script, you need to configure the following in `con
   3. Generate or copy your offline token
 
 ### LlamaStack
-- **Inference model** - LLM model name (e.g., `Llama-4-Scout-17B-16E-W4A16`)
+- **Inference model** - LLM model name (e.g., `Qwen3.6-35B-A3B`)
 - **VLLM URL** - Your vLLM inference endpoint
 - **VLLM API token** - Authentication token for vLLM
 - **VLLM TLS verify** - Set to `true` or `false` for SSL verification

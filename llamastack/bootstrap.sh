@@ -2,7 +2,7 @@
 
 #miluvs remote with lls is failing due to the bug with files_api integration as noted here https://github.com/llamastack/llama-stack/issues/2626
 
-export INFERENCE_MODEL="Llama-4-Scout-17B-16E-W4A16"
+export INFERENCE_MODEL="Qwen3.6-35B-A3B"
 export VLLM_URL="https://litellm-litemaas.apps.prod.rhoai.rh-aiservices-bu.com/v1"
 export VLLM_TLS_VERIFY="true" 
 export VLLM_API_TOKEN=""
