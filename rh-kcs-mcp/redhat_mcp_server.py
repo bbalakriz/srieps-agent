@@ -8,10 +8,16 @@ This MCP server implements tools to interact with Red Hat APIs:
 3. Search Red Hat Cases
 4. Get Case details
 
+Supports two modes via KCS_MODE env var:
+  online  (default) — calls access.redhat.com, requires RH_API_OFFLINE_TOKEN
+  offline            — queries local Milvus via LlamaStack RAG, no internet needed
+                       requires LLAMA_STACK_URL and KCS_VECTOR_DB_ID
+
 The server uses the Model Context Protocol (MCP) to expose these tools to LLM applications.
 """
 
 import os
+import asyncio
 import json
 from typing import Optional, List, Dict, Any, Union
 import httpx
@@ -26,6 +32,117 @@ load_dotenv()
 # Create MCP server
 mcp = FastMCP("RedHat KCS API")
 
+# ── Offline mode configuration ────────────────────────────────────────────────
+KCS_MODE = os.getenv("KCS_MODE", "online").lower()        # "online" | "offline"
+LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
+KCS_VECTOR_DB_ID = os.getenv("KCS_VECTOR_DB_ID", "kcs_vector_id")
+
+_kcs_vector_store_uuid: str | None = None  # cached UUID; resolved on first query
+
+
+def _resolve_vector_store_uuid() -> str:
+    """Resolve KCS_VECTOR_DB_ID name to its vs_xxx UUID via vector_stores.list()."""
+    if not LLAMA_STACK_URL:
+        raise RuntimeError("LLAMA_STACK_URL must be set when KCS_MODE=offline")
+    from llama_stack_client import LlamaStackClient
+    client = LlamaStackClient(base_url=LLAMA_STACK_URL)
+    stores = client.vector_stores.list()
+    match = next((s for s in stores.data if s.name == KCS_VECTOR_DB_ID), None)
+    if not match:
+        available = [s.name for s in stores.data]
+        raise RuntimeError(
+            f"Vector store '{KCS_VECTOR_DB_ID}' not found. Available: {available}"
+        )
+    print(f"[KCS MCP] Resolved '{KCS_VECTOR_DB_ID}' -> UUID '{match.id}'")
+    return match.id
+
+
+class _Chunk:
+    """Minimal chunk wrapper for uniform access across callers."""
+    def __init__(self, metadata: dict, content: str = ""):
+        self.metadata = metadata
+        self.content = content
+
+
+def _parse_kcs_header(content: str) -> dict:
+    """
+    Extract KCS_ID, Title, View_URI, Product from the structured header lines
+    written by ingest_kcs.py's format_article().
+    """
+    meta = {}
+    for line in content.split("\n")[:10]:
+        if line.startswith("KCS_ID:"):
+            meta["kcs_id"] = line[7:].strip()
+        elif line.startswith("Title:"):
+            meta["title"] = line[6:].strip()
+        elif line.startswith("View_URI:"):
+            meta["view_uri"] = line[9:].strip()
+        elif line.startswith("Product:"):
+            meta["product"] = line[8:].strip()
+    return meta
+
+
+def _parse_kcs_sections(content: str) -> dict:
+    """Extract Issue, Resolution, Root Cause section bodies from article content."""
+    result = {}
+    section_map = {"Issue:": "issue", "Resolution:": "resolution", "Root Cause:": "root_cause"}
+    current_key = None
+    current_lines: list[str] = []
+
+    for line in content.split("\n"):
+        if line.strip() in section_map:
+            if current_key and current_lines:
+                result[current_key] = "\n".join(current_lines).strip()
+            current_key = section_map[line.strip()]
+            current_lines = []
+        elif current_key is not None:
+            current_lines.append(line)
+
+    if current_key and current_lines:
+        result[current_key] = "\n".join(current_lines).strip()
+    return result
+
+
+def _rag_query_sync(query: str, top_k: int = 10) -> tuple[list, list]:
+    """
+    Search via client.vector_stores.search() (/v1/vector_stores/{id}/search).
+    KCS metadata (kcs_id, title, view_uri, etc.) is parsed from the structured
+    text header written by ingest_kcs.py's format_article().
+    """
+    global _kcs_vector_store_uuid
+    if _kcs_vector_store_uuid is None:
+        _kcs_vector_store_uuid = _resolve_vector_store_uuid()
+    if not LLAMA_STACK_URL:
+        raise RuntimeError("LLAMA_STACK_URL must be set when KCS_MODE=offline")
+    from llama_stack_client import LlamaStackClient
+    client = LlamaStackClient(base_url=LLAMA_STACK_URL)
+    result = client.vector_stores.search(
+        _kcs_vector_store_uuid,
+        query=query,
+        max_num_results=top_k,
+    )
+    chunks, scores = [], []
+    for item in result.data:
+        # content is a list of DataContent objects (item.content[i].text)
+        text = "\n".join(
+            c.text for c in (item.content or []) if hasattr(c, "text") and c.text
+        )
+        meta = _parse_kcs_header(text)
+        chunks.append(_Chunk(metadata=meta, content=text))
+        scores.append(item.score or 0.0)
+    return chunks, scores
+
+
+async def _rag_query(query: str, top_k: int = 10) -> tuple[list, list]:
+    return await asyncio.to_thread(_rag_query_sync, query, top_k)
+
+
+if KCS_MODE == "offline":
+    print(f"[KCS MCP] Running in OFFLINE mode — RAG backend: {LLAMA_STACK_URL}, vector DB: {KCS_VECTOR_DB_ID}")
+else:
+    print("[KCS MCP] Running in ONLINE mode — backend: access.redhat.com")
+
+# ── Online mode configuration ─────────────────────────────────────────────────
 # Configuration
 class RedHatAPI:
     """Red Hat API client with authentication and request handling."""
@@ -34,8 +151,8 @@ class RedHatAPI:
         self.base_url = "https://access.redhat.com"
         self.sso_url = "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token"
         self.offline_token = os.getenv("RH_API_OFFLINE_TOKEN")
-        if not self.offline_token:
-            raise ValueError("RH_API_OFFLINE_TOKEN environment variable is required")
+        if not self.offline_token and KCS_MODE == "online":
+            raise ValueError("RH_API_OFFLINE_TOKEN environment variable is required in online mode")
         
         self.access_token = None
         self.token_expiry = None
@@ -98,19 +215,39 @@ rhapi = RedHatAPI()
 async def search_kcs(query: str, rows: int = 50, start: int = 0, session_id: str = None) -> List[Dict]:
     """
     Search for Red Hat KCS Solutions and return a list with Solution IDs.
-    
+
     Args:
         query: Search query string
         rows: Number of results to return (default: 50)
         start: Starting index for pagination (default: 0)
-        
+
     Returns:
         List of solutions with their IDs and metadata
-    
+
     By default, this tool returns only documents where documentKind is either "Article" or "Solution" and accessState is either "active" or "private".
     """
+
+    if KCS_MODE == "offline":
+        chunks, scores = await _rag_query(query, top_k=rows)
+        solutions = []
+        seen_ids: set[str] = set()
+        for chunk, score in zip(chunks, scores):
+            meta = chunk.metadata or {}
+            kcs_id = meta.get("kcs_id", "")
+            if not kcs_id or kcs_id in seen_ids:
+                continue
+            seen_ids.add(kcs_id)
+            solutions.append({
+                "id": kcs_id,
+                "title": meta.get("title", ""),
+                "score": score,
+                "view_uri": meta.get("view_uri", ""),
+            })
+        print(f"[KCS MCP] search_kcs offline: query='{query}' → {len(solutions)} results")
+        return solutions
+
     path = "/hydra/rest/search/v2/kcs"
-    
+
     data = {
         "q": query,
         "rows": rows,
@@ -118,9 +255,9 @@ async def search_kcs(query: str, rows: int = 50, start: int = 0, session_id: str
         "start": start,
         "clientName": "mcp"
     }
-    
+
     result = await rhapi.make_request("post", path, data)
-    
+
     # Format the response to include only relevant information
     solutions = []
     if "response" in result and "docs" in result["response"]:
@@ -132,7 +269,7 @@ async def search_kcs(query: str, rows: int = 50, start: int = 0, session_id: str
                 "view_uri": doc.get("view_uri")
             }
             solutions.append(solution)
-    
+
     return solutions
 
 @mcp.tool()
@@ -145,15 +282,32 @@ async def get_kcs(solution_id: str, session_id: str = None) -> Dict:
     Returns:
         Dictionary with title, Environment, Issue, Resolution, and Root Cause
     """
+
+    if KCS_MODE == "offline":
+        chunks, _ = await _rag_query(f"KCS article {solution_id}", top_k=20)
+        for chunk in chunks:
+            meta = chunk.metadata or {}
+            if meta.get("kcs_id") != solution_id:
+                continue
+            sections = _parse_kcs_sections(chunk.content)
+            return {
+                "title": meta.get("title", ""),
+                "environment": meta.get("product", ""),
+                "issue": sections.get("issue", ""),
+                "resolution": sections.get("resolution", ""),
+                "root_cause": sections.get("root_cause", ""),
+            }
+        return {"title": "", "environment": "", "issue": "", "resolution": "", "root_cause": ""}
+
     # Use the KCS search API to get the solution data
     path = "/hydra/rest/search/v2/kcs"
-    
+
     data = {
         "q": f"id:{solution_id}",
-}
-    
+    }
+
     result = await rhapi.make_request("post", path, data)
-    
+
     # Check if we got a result
     if not result or "response" not in result or "docs" not in result["response"] or not result["response"]["docs"]:
         return {
@@ -163,10 +317,10 @@ async def get_kcs(solution_id: str, session_id: str = None) -> Dict:
             "resolution": "",
             "root_cause": ""
         }
-    
+
     # Extract the solution data from the first document
     doc = result["response"]["docs"][0]
-    
+
     # Initialize the result dictionary
     solution_data = {
         "title": doc.get("publishedTitle", ""),
@@ -175,7 +329,7 @@ async def get_kcs(solution_id: str, session_id: str = None) -> Dict:
         "resolution": doc.get("solution_resolution", ""),
         "root_cause": doc.get("solution_rootcause", ""),
     }
-    
+
     return solution_data
 
 
@@ -184,17 +338,27 @@ async def get_kcs(solution_id: str, session_id: str = None) -> Dict:
 async def search_cases(query: str, rows: int = 10, start: int = 0, session_id: str = None) -> List[Dict]:
     """
     Search for Red Hat cases and return a list of case numbers.
-    
+
     Args:
         query: Search query string
         rows: Number of results to return (default: 10)
         start: Starting index for pagination (default: 0)
-        
+
     Returns:
         List of cases with their numbers and metadata
     """
+    if KCS_MODE == "offline":
+        return [{
+            "case_number": "N/A",
+            "summary": "Case search is not available in offline mode. Use search_kcs to find relevant knowledge articles.",
+            "status": "offline",
+            "product": None, "version": None, "severity": None,
+            "owner": None, "created_date": None, "created_by": None,
+            "last_modified_date": None, "uri": None,
+        }]
+
     path = "/hydra/rest/search/v2/cases"
-    
+
     data = {
         "q": query,
         "start": start,
@@ -202,7 +366,7 @@ async def search_cases(query: str, rows: int = 10, start: int = 0, session_id: s
         "partnerSearch": False,
         "expression": "sort=case_lastModifiedDate%20desc&fl=case_createdByName%2Ccase_createdDate%2Ccase_lastModifiedDate%2Ccase_lastModifiedByName%2Cid%2Curi%2Ccase_summary%2Ccase_status%2Ccase_product%2Ccase_version%2Ccase_accountNumber%2Ccase_number%2Ccase_contactName%2Ccase_owner%2Ccase_severity"
     }
-    
+
     result = await rhapi.make_request("post", path, data)
     
     # Format the response to include only relevant information
@@ -230,13 +394,23 @@ async def search_cases(query: str, rows: int = 10, start: int = 0, session_id: s
 async def get_case(case_number: str, session_id: str = None) -> Dict:
     """
     Get case details by case number.
-    
+
     Args:
         case_number: The case number (e.g., "04145487")
-        
+
     Returns:
         Formatted case data with description, severity, issue, case number, and comments
     """
+    if KCS_MODE == "offline":
+        return {
+            "summary": f"Case {case_number} is not accessible in offline mode.",
+            "description": "Live case data requires connectivity to access.redhat.com. "
+                           "Use search_kcs to find knowledge articles related to your issue.",
+            "severity": None,
+            "comments": [],
+            "status": "offline",
+        }
+
     path = f"/hydra/rest/v1/cases/{case_number}"
     data = await rhapi.make_request("get", path)
     

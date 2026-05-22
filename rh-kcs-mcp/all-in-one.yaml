@@ -22,10 +22,10 @@ spec:
     spec:
       containers:
         - name: mcp
-          image: quay.io/balki404/rh-kcs-mcp:0.0.3
+          image: quay.io/balki404/rh-kcs-mcp:0.0.8
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 8000
               name: http
           env:
             - name: RH_API_OFFLINE_TOKEN
@@ -33,6 +33,15 @@ spec:
                 secretKeyRef:
                   name: redhat-api-token
                   key: RH_API_OFFLINE_TOKEN
+            # Set to "offline" for air-gapped deployments.
+            # When offline, RH_API_OFFLINE_TOKEN is not used.
+            - name: KCS_MODE
+              value: "online"
+            # Required when KCS_MODE=offline
+            - name: LLAMA_STACK_URL
+              value: ""
+            - name: KCS_VECTOR_DB_ID
+              value: "kcs_vector_id"
           readinessProbe:
             tcpSocket:
               port: 8000
