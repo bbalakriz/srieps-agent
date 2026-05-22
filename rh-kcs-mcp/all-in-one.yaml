@@ -33,8 +33,8 @@ spec:
                 secretKeyRef:
                   name: redhat-api-token
                   key: RH_API_OFFLINE_TOKEN
-            # Set to "offline" for air-gapped deployments.
-            # When offline, RH_API_OFFLINE_TOKEN is not used.
+            # Default is offline (local kcs_vector_id RAG). Set to "online" for live API access.
+            # When offline, RH_API_OFFLINE_TOKEN is not used at runtime.
             - name: KCS_MODE
               value: "offline"
             # Required when KCS_MODE=offline

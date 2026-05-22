@@ -9,8 +9,8 @@ This MCP server implements tools to interact with Red Hat APIs:
 4. Get Case details
 
 Supports two modes via KCS_MODE env var:
-  online  (default) — calls access.redhat.com, requires RH_API_OFFLINE_TOKEN
-  offline            — queries local Milvus via LlamaStack RAG, no internet needed
+  offline (default) — queries local Milvus via LlamaStack RAG, no internet needed
+  online            — calls access.redhat.com, requires RH_API_OFFLINE_TOKEN
                        requires LLAMA_STACK_URL and KCS_VECTOR_DB_ID
 
 The server uses the Model Context Protocol (MCP) to expose these tools to LLM applications.
@@ -33,7 +33,7 @@ load_dotenv()
 mcp = FastMCP("RedHat KCS API")
 
 # ── Offline mode configuration ────────────────────────────────────────────────
-KCS_MODE = os.getenv("KCS_MODE", "online").lower()        # "online" | "offline"
+KCS_MODE = os.getenv("KCS_MODE", "offline").lower()       # "online" | "offline"
 LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL", "")
 KCS_VECTOR_DB_ID = os.getenv("KCS_VECTOR_DB_ID", "kcs_vector_id")
 
