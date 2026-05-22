@@ -663,7 +663,7 @@ deploymentSpec:
           \    raise ValueError(f\"Model '{embed_model_id}' is not an embedding model\"\
           )\n\n    embedding_dimension = matching_model.metadata[\"embedding_dimension\"\
           ]\n\n    vector_store = client.vector_stores.create(\n        name=vector_db_id,\n\
-          \        extra_body={\n            \"provider_id\": \"milvus\",\n      \
+          \        extra_body={\n            \"provider_id\": \"milvus-remote\",\n      \
           \      \"embedding_model\": matching_model.identifier,\n            \"embedding_dimension\"\
           : embedding_dimension,\n        }\n    )\n    print(\n        f\"Created\
           \ vector store '{vector_db_id}' with embedding model '{embed_model_id}'\

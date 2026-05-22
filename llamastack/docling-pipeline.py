@@ -43,7 +43,7 @@ def register_vector_db(
     vector_store = client.vector_stores.create(
         name=vector_db_id,
         extra_body={
-            "provider_id": "milvus",
+            "provider_id": "milvus-remote",
             "embedding_model": matching_model.identifier,
             "embedding_dimension": embedding_dimension,
         }
@@ -366,8 +366,7 @@ def docling_convert_pipeline(
             convert_task.set_cpu_limit("4")
             convert_task.set_memory_request("2Gi")
             convert_task.set_memory_limit("6Gi")
-
-
+        
 if __name__ == "__main__":
     compiler.Compiler().compile(
         docling_convert_pipeline, package_path=__file__.replace(".py", "_compiled.yaml")
