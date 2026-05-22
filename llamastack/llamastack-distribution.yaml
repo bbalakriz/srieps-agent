@@ -5,6 +5,9 @@ metadata:
 spec:
   replicas: 1
   server:
+    userConfig:                                                                                                                                  
+      configMapName: llamastack-run-config                                                                                                 
+      configMapNamespace: llamastack  
     containerSpec:
       resources:
         requests:
@@ -46,11 +49,46 @@ spec:
             secretKeyRef:
               key: VLLM_API_TOKEN
               name: llama-stack-inference-model-secret
-        - name: MILVUS_DB_PATH
-          value: ~/.llama/milvus.db
-        - name: FMS_ORCHESTRATOR_URL
-          value: "http://localhost"
+        # - name: MILVUS_DB_PATH
+        #   value: ~/.llama/milvus.db
+        # - name: FMS_ORCHESTRATOR_URL
+        #   value: "http://localhost"
+        - name: MILVUS_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: milvus-secret
+              key: MILVUS_ENDPOINT
+        - name: MILVUS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: milvus-secret
+              key: MILVUS_TOKEN
+        - name: MILVUS_CONSISTENCY_LEVEL
+          valueFrom:
+            secretKeyRef:
+              name: milvus-secret
+              key: MILVUS_CONSISTENCY_LEVEL
+        - name: POSTGRES_HOST
+          value: postgres-llamastack.llamastack.svc.cluster.local
+        - name: POSTGRES_PORT
+          value: '5432'
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              key: database-name
+              name: postgres-llamastack     
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: database-user
+              name: postgres-llamastack     
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: database-password
+              name: postgres-llamastack                 
       name: llama-stack
       port: 8321
     distribution:
       name: rh-dev
+
