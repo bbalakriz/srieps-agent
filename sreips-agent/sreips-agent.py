@@ -18,12 +18,27 @@ VECTOR_DB_ID = os.getenv("VECTOR_DB_ID", "sreips_vector_id")
 # Initialize client globally
 client = None
 model_id = None
+_vector_store_uuid = None  # Cached UUID after lazy resolution
 
 class QueryRequest(BaseModel):
     query: str
     
 class QueryResponse(BaseModel):
     combined_results: str
+
+def get_vector_store_uuid() -> str:
+    """Lazily resolve vector store name to UUID on first use (cached thereafter)."""
+    global _vector_store_uuid
+    if _vector_store_uuid is None:
+        if '-' not in VECTOR_DB_ID:
+            stores = client.vector_stores.list()
+            matching = next((s for s in stores.data if s.name == VECTOR_DB_ID), None)
+            if not matching:
+                raise ValueError(f"Vector store '{VECTOR_DB_ID}' not found. Is the pipeline still running?")
+            _vector_store_uuid = matching.id
+        else:
+            _vector_store_uuid = VECTOR_DB_ID
+    return _vector_store_uuid
 
 def initialize_client():
     """Initialize the LlamaStack client and register toolgroups"""
@@ -55,6 +70,8 @@ def query_rag_agent(prompt: str) -> str:
     """Query the RAG agent with the given prompt"""
     print("Received prompt for RAG agent:", prompt)
     
+    vector_store_uuid = get_vector_store_uuid()
+    
     rag_agent = Agent(
         client,
         model=model_id,
@@ -62,7 +79,7 @@ def query_rag_agent(prompt: str) -> str:
         tools=[
             {
                 "type": "file_search",
-                "vector_store_ids": [VECTOR_DB_ID],
+                "vector_store_ids": [vector_store_uuid],
             },
         ],
     )
