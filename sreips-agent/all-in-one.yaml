@@ -59,6 +59,11 @@ spec:
               configMapKeyRef:
                 name: sreips-agent-config
                 key: VECTOR_DB_ID
+          - name: MODEL_ID
+            valueFrom:
+              configMapKeyRef:
+                name: sreips-agent-config
+                key: MODEL_ID
 ---
 apiVersion: v1
 kind: Service
