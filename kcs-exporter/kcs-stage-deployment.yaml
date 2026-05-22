@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kcs-stage
+  namespace: llamastack
+  labels:
+    app: kcs-stage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kcs-stage
+  template:
+    metadata:
+      labels:
+        app: kcs-stage
+    spec:
+      volumes:
+        - name: d
+          persistentVolumeClaim:
+            claimName: kcs-data
+      containers:
+        - name: c
+          image: registry.access.redhat.com/ubi9
+          command: ["sleep", "infinity"]
+          volumeMounts:
+            - name: d
+              mountPath: /data

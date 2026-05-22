@@ -1,0 +1,15 @@
+# PVC for staging kcs-articles.ndjson inside the cluster.
+# Create once; re-use across ingest Job runs.
+#   oc -n llamastack apply -f kcs-data-pvc.yaml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kcs-data
+  namespace: llamastack
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi

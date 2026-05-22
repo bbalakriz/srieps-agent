@@ -1,0 +1,12 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY ingest_kcs.py ./
+
+# Reads kcs-articles.ndjson from /data (mounted PVC).
+# All config via env: LLAMA_STACK_URL, KCS_VECTOR_DB_ID, EMBED_MODEL_ID.
+CMD ["python", "ingest_kcs.py", "--input", "/data/kcs-articles.ndjson"]

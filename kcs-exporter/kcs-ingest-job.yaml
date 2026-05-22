@@ -1,0 +1,70 @@
+# KCS Ingest Job (air-gapped / offline)
+#
+# Reads kcs-articles.ndjson from a PVC and ingests into LlamaStack.
+# Export runs offline (internet-connected machine); only ingest runs in-cluster.
+#
+# Workflow:
+#   1. On an internet-connected machine:
+#        export RH_API_OFFLINE_TOKEN=<token>
+#        python export_kcs.py --output kcs-articles.ndjson
+#
+#   2. Stage the ndjson onto the cluster PVC (one-time, or after each re-export):
+#        oc -n llamastack apply -f kcs-data-pvc.yaml
+#        oc apply -f kcs-stage-deployment.yaml
+#        
+#        # Wait for the kcs-stage pod to be Running, then:
+#        POD_NAME=$(oc -n llamastack get pods -l app:kcs-stage -o jsonpath='{.items[0].metadata.name}')
+#        oc -n llamastack cp kcs-exporter/<directory>/<file>.ndjson $POD_NAME:/data/kcs-articles.ndjson
+#        oc -n llamastack delete deployment kcs-stage
+#
+#   3. Trigger an ingest run on demand:
+#        oc -n llamastack create -f kcs-ingest-job.yaml
+#
+#   4. Watch progress:
+#        oc -n llamastack logs -l app=kcs-ingest -f
+#
+# Each invocation creates a uniquely named Job (generateName).
+# Completed Jobs auto-delete after 24 h (ttlSecondsAfterFinished).
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: kcs-ingest-
+  namespace: llamastack
+  labels:
+    app: kcs-ingest
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: kcs-ingest
+    spec:
+      restartPolicy: OnFailure
+      volumes:
+        - name: kcs-data
+          persistentVolumeClaim:
+            claimName: kcs-data
+      containers:
+        - name: kcs-ingest
+          image: quay.io/balki404/sreips-kcs-exporter:0.0.1
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          volumeMounts:
+            - name: kcs-data
+              mountPath: /data
+              readOnly: true
+          env:
+            - name: LLAMA_STACK_URL
+              value: "http://lsd-llama-milvus-service.llamastack.svc.cluster.local:8321"
+            - name: KCS_VECTOR_DB_ID
+              value: "kcs_vector_id"
+            - name: EMBED_MODEL_ID
+              value: "ibm-granite/granite-embedding-125m-english"
