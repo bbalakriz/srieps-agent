@@ -36,7 +36,7 @@ spec:
             # Set to "offline" for air-gapped deployments.
             # When offline, RH_API_OFFLINE_TOKEN is not used.
             - name: KCS_MODE
-              value: "online"
+              value: "offline"
             # Required when KCS_MODE=offline
             - name: LLAMA_STACK_URL
               value: ""
