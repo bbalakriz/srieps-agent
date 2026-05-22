@@ -46,7 +46,7 @@ def initialize_client():
             
             # List available tools to verify registration
             tools = client.tools.list(toolgroup_id="mcp::rh-kcs-mcp")
-            print(f"Available MCP tools: {[t.identifier for t in tools]}")
+            print(f"Available MCP tools: {[t.name for t in tools]}")
         except Exception as e:
             # Toolgroup might already be registered
             print(f"Toolgroup registration (may already exist): {e}")
@@ -132,7 +132,7 @@ def query_mcp_agent(prompt: str) -> str:
     # List available tools before creating agent (for debugging)
     try:
         available_tools = client.tools.list(toolgroup_id="mcp::rh-kcs-mcp")
-        tool_identifiers = [t.identifier for t in available_tools]
+        tool_identifiers = [t.name for t in available_tools]
         print(f"Available tools in mcp::rh-kcs-mcp: {tool_identifiers}")
     except Exception as e:
         print(f"Error listing tools: {e}")

@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: sreips-agent
-        image: quay.io/balki404/sreips-agent:rhoai-3u14
+        image: quay.io/balki404/sreips-agent:rhoai-3u16
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
