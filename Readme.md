@@ -166,10 +166,11 @@ Before running the bootstrap script, you need to configure the following in `con
 - **Root password** - MinIO admin password (minimum 8 characters)
 
 ### Red Hat KCS MCP
-- **RH API Offline Token** - Get from https://access.redhat.com/management/api
+- **RH API Offline Token** - Required for online mode and for exporting KCS articles before offline ingest. Get from https://access.redhat.com/management/api
   1. Log in with your Red Hat account
   2. Navigate to API Tokens section
   3. Generate or copy your offline token
+- **KCS mode** - `KCS_MODE` in `config.env` (default `offline`). Bootstrap applies it to `redhat-api-mcp` together with `LLAMA_STACK_URL`. Run the KCS ingest workflow in Post-Deployment Steps before KCS queries will work.
 
 ### LlamaStack
 - **Inference model** - LLM model name (e.g., `Qwen3.6-35B-A3B`)
@@ -178,7 +179,7 @@ Before running the bootstrap script, you need to configure the following in `con
 - **VLLM TLS verify** - Set to `true` or `false` for SSL verification
 
 ### SREIPS Agent
-- **Vector database ID** - ⚠️ **Important**: In RHOAI-3 based implementation, this must be obtained **after** the data ingestion RAG pipeline completes. RHOAI-3 generates the vector store ID dynamically and no longer uses the given name. See Post-Deployment Steps below for instructions.
+- **Vector database ID** - Defaults to `sreips_vector_id` in `config.env`. The SREIPS agent resolves this store name to the LlamaStack UUID at runtime after the enterprise KB ingestion pipeline creates it. No post-deployment update is required.
 
 See `config.env.template` for detailed descriptions and example values.
 
@@ -239,31 +240,15 @@ If installation fails:
 
 After the bootstrap script completes successfully, you need to complete the following steps:
 
-### 1. Configure Vector Database ID (Required)
+> ⚠️ **CRITICAL**: LlamaStack Restart Limitation
+> 
+> **DO NOT restart LlamaStack pods** after the initial bootstrap unless absolutely necessary. Due to a bug in the Milvus remote provider (in the LlamaStack version used here), restarting LlamaStack does not restore the operational registry on startup. This breaks both:
+> - **Persisted KCS data** ingested via offline pipeline
+> - **Internal knowledge base** uploaded via RAG pipeline
+> 
+> The vector database connections are lost and cannot be recovered without manual re-ingestion of all data. If restart becomes necessary, you will need to re-run the data ingestion pipelines to restore service functionality.
 
-In the new RHOAI-3 based implementation, the `VECTOR_DB_ID` must be obtained after the data ingestion RAG pipeline completes, as RHOAI-3 generates the vector store ID dynamically and no longer uses the given name.
-
-1. **Get the Vector Store ID from the Pipeline:**
-   - Navigate to your RHOAI-3 Data Science Pipelines dashboard
-   - Find the completed data ingestion RAG pipeline run
-   - Copy the generated vector store ID from the pipeline output/logs
-
-2. **Update the ConfigMap:**
-   ```bash
-   # Edit the configmap to set VECTOR_DB_ID
-   oc edit configmap sreips-agent-config -n sreips-agent
-   ```
-   - Add or update the `VECTOR_DB_ID` environment variable with the vector store ID obtained from step 1
-   - Save and exit
-
-3. **Restart the SREIPS Agent Pod:**
-   ```bash
-   # Restart the pod to pick up the new configuration
-   oc delete pod -l app=sreips-agent -n sreips-agent
-   ```
-   The pod will automatically restart with the new configuration.
-
-### 2. Update Slack App Configuration
+### 1. Update Slack App Configuration
 
 1. **Get the Remediation Agent Route URL:**
    ```bash
@@ -277,6 +262,88 @@ In the new RHOAI-3 based implementation, the `VECTOR_DB_ID` must be obtained aft
    - Click **Save Changes**
 
 This enables the interactive remediation buttons in Slack notifications.
+
+### 2. KCS offline ingest (required)
+
+The Red Hat KCS MCP server (`deployment/redhat-api-mcp` in namespace `mcp-servers`) defaults to offline mode. It reads from the local `kcs_vector_id` Milvus store via LlamaStack RAG instead of access.redhat.com.
+
+| Mode | Behavior | `RH_API_OFFLINE_TOKEN` at runtime |
+|------|----------|-----------------------------------|
+| `offline` (default) | Queries local `kcs_vector_id` via LlamaStack RAG | Not used |
+| `online` | Queries access.redhat.com in real time | Required |
+
+Bootstrap deploys offline mode (`KCS_MODE=offline` in `config.env` and `rh-kcs-mcp/all-in-one.yaml`) and patches `LLAMA_STACK_URL` plus `KCS_MODE` from `config.env` after LlamaStack is up. KCS search will not return useful results until you complete the ingest steps below.
+
+Set `export KCS_MODE="offline"` in `config.env` (default in `config.env.template`). To use online mode instead, set `KCS_MODE="online"` before bootstrap or switch after deploy (see below).
+
+#### KCS ingest workflow
+
+**Step 1: Export KCS articles (internet connected machine)**
+
+```bash
+export RH_API_OFFLINE_TOKEN="<your-offline-token-from-https://access.redhat.com/management/api>"
+cd kcs-exporter
+pip install -r requirements.txt
+python export_kcs.py --output kcs-articles.ndjson --products ocp
+```
+
+Optional product filter: `python export_kcs.py --output kcs-articles.ndjson --products ocp,rhoai`
+
+**Step 2: Transfer `kcs-articles.ndjson` to your cluster admin host**
+
+**Step 3: Stage the NDJSON onto the cluster PVC (`llamastack` namespace)**
+
+```bash
+# from the repo root
+oc -n llamastack apply -f kcs-exporter/kcs-data-pvc.yaml
+oc -n llamastack apply -f kcs-exporter/kcs-stage-deployment.yaml
+
+# wait for the staging pod
+oc -n llamastack wait --for=condition=Ready pod -l app=kcs-stage --timeout=120s
+
+POD_NAME=$(oc -n llamastack get pods -l app=kcs-stage -o jsonpath='{.items[0].metadata.name}')
+oc -n llamastack cp kcs-exporter/kcs-articles.ndjson "${POD_NAME}:/data/kcs-articles.ndjson"
+
+# remove the staging deployment when the copy succeeds
+oc -n llamastack delete deployment kcs-stage
+```
+
+**Step 4: Trigger offline KCS ingestion into Milvus**
+
+Each run creates a new Job (`generateName: kcs-ingest-`). Re-run this step after re-exporting articles or after a LlamaStack restart that lost persisted data.
+
+```bash
+oc -n llamastack create -f kcs-exporter/kcs-ingest-job.yaml
+
+# monitor until the job completes
+oc -n llamastack logs -l app=kcs-ingest -f
+```
+
+The job reads `/data/kcs-articles.ndjson` from the `kcs-data` PVC and ingests into the `kcs_vector_id` vector store via the in-cluster LlamaStack service URL.
+
+#### Switching to online mode (optional)
+
+Use when the cluster has outbound access to access.redhat.com and you prefer live KCS over the local snapshot:
+
+```bash
+oc set env deployment/redhat-api-mcp KCS_MODE=online -n mcp-servers
+oc rollout status deployment/redhat-api-mcp -n mcp-servers
+```
+
+Update `config.env`: `export KCS_MODE="online"`. Ensure `RH_API_OFFLINE_TOKEN` is valid in the `redhat-api-token` secret (bootstrap creates this from `config.env`).
+
+#### Switching back to offline mode
+
+```bash
+oc set env deployment/redhat-api-mcp KCS_MODE=offline -n mcp-servers
+oc rollout status deployment/redhat-api-mcp -n mcp-servers
+```
+
+Update `config.env`: `export KCS_MODE="offline"`. Ensure KCS ingest has been completed so `kcs_vector_id` is populated.
+
+#### Re-triggering KCS ingest
+
+To refresh offline KCS data: repeat Steps 1 through 4 (re-export, re-stage, `oc -n llamastack create -f kcs-exporter/kcs-ingest-job.yaml`). Do not restart LlamaStack pods unless unavoidable (see warning above).
 
 ## Using SREIPS
 
