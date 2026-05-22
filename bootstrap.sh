@@ -67,6 +67,58 @@ log_step() {
     echo -e "${GREEN}===================================================${NC}\n"
 }
 
+# strip quotes/whitespace from a config.env RHS value
+strip_config_value() {
+    local val="$1"
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="${val%"${val##*[![:space:]]}"}"
+    if [[ "$val" =~ ^\"(.*)\"$ ]]; then
+        val="${BASH_REMATCH[1]}"
+    elif [[ "$val" =~ ^\'(.*)\'$ ]]; then
+        val="${BASH_REMATCH[1]}"
+    fi
+    printf '%s' "$val"
+}
+
+# read the last assignment for VAR from config.env (supports export or plain VAR=)
+read_config_var_from_file() {
+    local var_name="$1"
+    local line rhs
+    line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${var_name}=" "$CONFIG_FILE" 2>/dev/null \
+        | grep -v '^[[:space:]]*#' | tail -1 || true)
+    if [ -z "$line" ]; then
+        printf ''
+        return 0
+    fi
+    rhs="${line#*=}"
+    strip_config_value "$rhs"
+}
+
+# reload Mattermost bot vars from disk (re-read after the bootstrap pause)
+reload_mattermost_bot_tokens() {
+    MATTERMOST_BOT_TOKEN="$(read_config_var_from_file MATTERMOST_BOT_TOKEN)"
+    MATTERMOST_BOT_TOKEN_ID="$(read_config_var_from_file MATTERMOST_BOT_TOKEN_ID)"
+    export MATTERMOST_BOT_TOKEN MATTERMOST_BOT_TOKEN_ID
+}
+
+mattermost_bot_tokens_configured() {
+    reload_mattermost_bot_tokens
+    [ -n "${MATTERMOST_BOT_TOKEN:-}" ] && [ -n "${MATTERMOST_BOT_TOKEN_ID:-}" ] \
+        && [ "${MATTERMOST_BOT_TOKEN}" != "<your-token>" ] \
+        && [ "${MATTERMOST_BOT_TOKEN_ID}" != "<your-token-id>" ]
+}
+
+# re-source full config.env; use set -a so non-export assignments are exported
+reload_config_env() {
+    set +u
+    set -a
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+    set +a
+    set -u
+    reload_mattermost_bot_tokens
+}
+
 # Error handler
 error_handler() {
     log_error "Installation failed at line $1"
@@ -204,6 +256,9 @@ check_prerequisites() {
     [ -z "${VLLM_API_TOKEN:-}" ] && missing_vars+=("VLLM_API_TOKEN")
     [ -z "${OPENAI_BASE_URL:-}" ] && missing_vars+=("OPENAI_BASE_URL")
     [ -z "${OPENAI_API_KEY:-}" ] && missing_vars+=("OPENAI_API_KEY")
+    [ -z "${POSTGRES_DB_USER:-}" ] && missing_vars+=("POSTGRES_DB_USER")
+    [ -z "${POSTGRES_DB_PASSWORD:-}" ] && missing_vars+=("POSTGRES_DB_PASSWORD")
+    [ -z "${POSTGRES_DB_NAME:-}" ] && missing_vars+=("POSTGRES_DB_NAME")
     
     # SREIPS Agent variables
     [ -z "${VECTOR_DB_ID:-}" ] && missing_vars+=("VECTOR_DB_ID")
@@ -224,6 +279,10 @@ check_prerequisites() {
     fi
     
     log_success "All required configuration variables are set"
+    
+    # Set optional Milvus password (default: auto-generated)
+    MILVUS_PASSWORD="${MILVUS_PASSWORD:-}"
+    export MILVUS_PASSWORD
 }
 
 # ==============================================================================
@@ -295,7 +354,7 @@ EOF
     log_success "Mattermost URL: $MATTERMOST_URL"
     
     # if the bot token is already in config.env (re-run scenario) skip the pause
-    if [ -n "${MATTERMOST_BOT_TOKEN:-}" ] && [ -n "${MATTERMOST_BOT_TOKEN_ID:-}" ]; then
+    if mattermost_bot_tokens_configured; then
         log_success "Mattermost bot token already configured in config.env, skipping setup prompt"
         log_success "Mattermost installation completed"
         return 0
@@ -309,22 +368,41 @@ EOF
     log_info "  2. Enable bot account creation and save"
     log_info "  3. Go to Integrations > Bot Accounts > Add Bot Account"
     log_info "  4. Create the bot (role: System Admin, postall permission enabled)"
-    log_info "  5. Copy the Token and Token ID shown on the success screen"
-    log_info "  6. Invite the bot to your team and to the ${MATTERMOST_CHANNEL:-sreips-helper} channel"
-    log_info "  7. Add to config.env:"
+    log_info "  5. Copy the Token and Token ID from the success screen (shown only once)"
+    log_info "  6. Invite the bot to your Mattermost team:"
+    log_info "       - Main menu > click your team name > Invite People > Invite Members"
+    log_info "       - Search for the bot username, select it, and click Invite"
+    log_info "  7. Create the alerts channel (name should match MATTERMOST_CHANNEL in config.env):"
+    log_info "       - Sidebar: + next to Channels > Create New Channel"
+    log_info "       - Name it ${MATTERMOST_CHANNEL:-sreips-helper} (Public or Private) > Create"
+    log_info "  8. Add the bot to that channel:"
+    log_info "       - Open the channel > click the channel name at the top > Add Members"
+    log_info "       - Search for the bot username, select it, and click Add"
+    log_info "  9. Edit this file (save before pressing Enter):"
+    log_info "       $CONFIG_FILE"
     log_info "       export MATTERMOST_BOT_TOKEN=\"<your-token>\""
     log_info "       export MATTERMOST_BOT_TOKEN_ID=\"<your-token-id>\""
-    log_info "  See Readme.md for the full step-by-step bot setup guide"
+    log_info "  See Readme.md for the full Mattermost setup guide"
     echo ""
-    read -r -p "Press Enter once config.env is updated with the Mattermost bot token to continue..."
+    read -r -p "Press Enter once config.env is saved with the Mattermost bot token to continue..."
     
-    # re-source config.env to pick up the newly added token values
-    # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
+    # re-read from disk (plain source can miss vars with set -u or missing export)
+    reload_config_env
     
-    if [ -z "${MATTERMOST_BOT_TOKEN:-}" ] || [ -z "${MATTERMOST_BOT_TOKEN_ID:-}" ]; then
+    if ! mattermost_bot_tokens_configured; then
         log_error "MATTERMOST_BOT_TOKEN and MATTERMOST_BOT_TOKEN_ID must be set in config.env"
-        log_error "Please set both values and re-run the bootstrap"
+        log_error "File: $CONFIG_FILE"
+        if grep -qE '^[[:space:]]*(export[[:space:]]+)?MATTERMOST_BOT_TOKEN=' "$CONFIG_FILE" 2>/dev/null; then
+            log_error "  MATTERMOST_BOT_TOKEN line found but value is empty or still a placeholder"
+        else
+            log_error "  MATTERMOST_BOT_TOKEN assignment not found (check variable name spelling)"
+        fi
+        if grep -qE '^[[:space:]]*(export[[:space:]]+)?MATTERMOST_BOT_TOKEN_ID=' "$CONFIG_FILE" 2>/dev/null; then
+            log_error "  MATTERMOST_BOT_TOKEN_ID line found but value is empty or still a placeholder"
+        else
+            log_error "  MATTERMOST_BOT_TOKEN_ID assignment not found (check variable name spelling)"
+        fi
+        log_error "Use export MATTERMOST_BOT_TOKEN=\"...\" and export MATTERMOST_BOT_TOKEN_ID=\"...\" then re-run bootstrap"
         exit 1
     fi
     
@@ -532,8 +610,67 @@ install_rh_kcs_mcp() {
     log_success "Red Hat KCS MCP Server installation completed"
 }
 
+install_milvus() {
+    log_step "7: Installing Milvus Vector Database"
+    
+    cd "${SCRIPT_DIR}/milvus" || exit 1
+    
+    log_info "Creating llamastack namespace..."
+    oc new-project llamastack 2>/dev/null || oc project llamastack
+    
+    log_info "Creating milvus-secret with credentials from config.env..."
+    oc create secret generic milvus-secret \
+        --from-literal=MILVUS_ENDPOINT="tcp://milvus-service:19530" \
+        --from-literal=MILVUS_TOKEN="$MILVUS_PASSWORD" \
+        --from-literal=MILVUS_CONSISTENCY_LEVEL="Bounded" \
+        -n llamastack \
+        --dry-run=client -o yaml | oc apply -f -
+    
+    log_info "Applying Milvus manifests..."
+    oc apply -f all-in-one.yaml -n llamastack
+    
+    log_info "Waiting for etcd deployment to be ready..."
+    oc rollout status deployment/etcd-deployment -n llamastack --timeout=300s
+    
+    log_info "Waiting for Milvus standalone deployment to be ready..."
+    oc rollout status deployment/milvus-standalone -n llamastack --timeout=600s
+    
+    log_info "Waiting for Milvus pod to be ready..."
+    wait_for_pod "llamastack" "app=milvus-standalone" 600
+    
+    log_success "Milvus installation completed"
+}
+
+install_postgres() {
+    log_step "8: Installing PostgreSQL for LlamaStack"
+    
+    cd "${SCRIPT_DIR}/llamastack" || exit 1
+    
+    log_info "Creating llamastack namespace..."
+    oc new-project llamastack 2>/dev/null || oc project llamastack
+    
+    log_info "Creating postgres-llamastack secret with credentials from config.env..."
+    oc create secret generic postgres-llamastack \
+        --from-literal=database-user="$POSTGRES_DB_USER" \
+        --from-literal=database-password="$POSTGRES_DB_PASSWORD" \
+        --from-literal=database-name="$POSTGRES_DB_NAME" \
+        -n llamastack \
+        --dry-run=client -o yaml | oc apply -f -
+    
+    log_info "Applying PostgreSQL manifests..."
+    oc apply -f postgres-llamastack.yaml -n llamastack
+    
+    log_info "Waiting for PostgreSQL deployment to be ready..."
+    oc rollout status deployment/postgres-llamastack -n llamastack --timeout=300s
+    
+    log_info "Waiting for PostgreSQL pod to be ready..."
+    wait_for_pod "llamastack" "app=postgres-llamastack" 300
+    
+    log_success "PostgreSQL installation completed"
+}
+
 install_llamastack() {
-    log_step "7: Installing LlamaStack"
+    log_step "9: Installing LlamaStack"
     
     cd "${SCRIPT_DIR}/llamastack" || exit 1
     
@@ -575,7 +712,10 @@ install_llamastack() {
         -n llamastack \
         --dry-run=client -o yaml | oc apply -f -
     
-    log_info "Applying LlamaStack manifests..."
+    log_info "Creating llamastack-run-config ConfigMap..."
+    oc apply -f llamastack-run-config.yaml -n llamastack
+
+    log_info "Applying LlamaStack distribution and supporting manifests..."
     oc apply -f llamastack-distribution.yaml -n llamastack
     oc apply -f all-in-one.yaml -n llamastack
     
@@ -673,8 +813,26 @@ install_llamastack() {
     log_success "LlamaStack installation completed"
 }
 
+patch_rh_kcs_mcp_with_llamastack_url() {
+    log_step "9.5: Patching RH KCS MCP with LlamaStack URL"
+    
+    log_info "Updating rh-kcs-mcp deployment with LLAMA_STACK_URL and KCS_MODE..."
+    oc set env deployment/redhat-api-mcp \
+        LLAMA_STACK_URL="$LLAMA_STACK_URL" \
+        KCS_MODE="${KCS_MODE:-offline}" \
+        -n mcp-servers
+    
+    log_info "Waiting for rh-kcs-mcp deployment to rollout..."
+    oc rollout status deployment/redhat-api-mcp -n mcp-servers --timeout=300s
+    
+    log_info "Waiting for updated rh-kcs-mcp pod to be ready..."
+    wait_for_pod "mcp-servers" "app=redhat-api-mcp" 300
+    
+    log_success "RH KCS MCP patched with LlamaStack URL"
+}
+
 install_sreips_agent() {
-    log_step "8: Installing SREIPS Agent and Remediation Agent"
+    log_step "10: Installing SREIPS Agent and Remediation Agent"
     
     cd "${SCRIPT_DIR}/sreips-agent" || exit 1
     
@@ -729,6 +887,44 @@ install_sreips_agent() {
     log_success "SREIPS Agent and Remediation Agent installation completed"
 }
 
+# print offline KCS ingest steps when KCS_MODE is offline (default)
+print_offline_kcs_ingest_reminder() {
+    local kcs_mode
+    kcs_mode="$(read_config_var_from_file KCS_MODE)"
+    kcs_mode="${kcs_mode:-offline}"
+    kcs_mode="$(echo "$kcs_mode" | tr '[:upper:]' '[:lower:]')"
+    if [ "$kcs_mode" != "offline" ]; then
+        return 0
+    fi
+
+    echo ""
+    log_warning "Next step: offline KCS ingest (KCS_MODE=offline)"
+    log_info "The RH KCS MCP server is in offline mode. Run the ingest workflow before KCS queries will work."
+    log_info "Full details: ${SCRIPT_DIR}/Readme.md (section: KCS offline ingest)"
+    echo ""
+    log_info "  1. On an internet connected machine, export articles:"
+    echo "       export RH_API_OFFLINE_TOKEN=\"<token-from-access.redhat.com/management/api>\""
+    echo "       cd ${SCRIPT_DIR}/kcs-exporter"
+    echo "       pip install -r requirements.txt"
+    echo "       python export_kcs.py --output kcs-articles.ndjson --products ocp"
+    echo ""
+    log_info "  2. Copy kcs-articles.ndjson to this host (repo root: ${SCRIPT_DIR})"
+    echo ""
+    log_info "  3. Stage onto the cluster PVC:"
+    echo "       oc -n llamastack apply -f ${SCRIPT_DIR}/kcs-exporter/kcs-data-pvc.yaml"
+    echo "       oc -n llamastack apply -f ${SCRIPT_DIR}/kcs-exporter/kcs-stage-deployment.yaml"
+    echo "       oc -n llamastack wait --for=condition=Ready pod -l app=kcs-stage --timeout=120s"
+    echo "       POD_NAME=\$(oc -n llamastack get pods -l app=kcs-stage -o jsonpath='{.items[0].metadata.name}')"
+    echo "       oc -n llamastack cp ${SCRIPT_DIR}/kcs-exporter/kcs-articles.ndjson \"\${POD_NAME}:/data/kcs-articles.ndjson\""
+    echo "       oc -n llamastack delete deployment kcs-stage"
+    echo ""
+    log_info "  4. Trigger ingest into Milvus (kcs_vector_id store):"
+    echo "       oc -n llamastack create -f ${SCRIPT_DIR}/kcs-exporter/kcs-ingest-job.yaml"
+    echo "       oc -n llamastack logs -l app=kcs-ingest -f"
+    echo ""
+    log_info "  Do not restart LlamaStack pods after ingest unless necessary (see Readme.md)."
+}
+
 # ==============================================================================
 # Main Installation Flow
 # ==============================================================================
@@ -742,9 +938,9 @@ main() {
     
     # now config.env is sourced - log the component list and sequence
     if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
-        log_info "This process will install: mattermost, sreips-core, minio, ocp-mcp, rh-kcs-mcp, llamastack, sreips-agent, remediation-agent"
+        log_info "This process will install: mattermost, sreips-core, minio, ocp-mcp, rh-kcs-mcp, milvus, postgres, llamastack, sreips-agent, remediation-agent"
     else
-        log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, llamastack, sreips-agent, remediation-agent"
+        log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, milvus, postgres, llamastack, sreips-agent, remediation-agent"
     fi
     
     # deploy Mattermost before sreips-core so the bot token is available
@@ -758,7 +954,10 @@ main() {
     install_minio
     install_ocp_mcp
     install_rh_kcs_mcp
+    install_milvus
+    install_postgres
     install_llamastack
+    patch_rh_kcs_mcp_with_llamastack_url
     install_sreips_agent
     
     # Final summary
@@ -780,6 +979,9 @@ main() {
     echo "    -H \"Content-Type: application/json\" \\"
     echo "    -d '{\"query\": \"CrashLoopBackOff OpenShift pod\"}'"
     echo ""
+
+    print_offline_kcs_ingest_reminder
+
     log_success "Installation completed successfully!"
 }
 
