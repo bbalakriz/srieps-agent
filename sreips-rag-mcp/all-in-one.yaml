@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sreips-rag-mcp
-  namespace: sreips-agent
+  namespace: hermes-agent  
   labels:
     app: sreips-rag-mcp
 spec:
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: sreips-rag-mcp
-          image: quay.io/balki404/sreips-hermes-rag-mcp:0.0.1
+          image: quay.io/balki404/sreips-hermes-rag-mcp:0.0.2
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -43,7 +43,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: sreips-rag-mcp
-  namespace: sreips-agent
+  namespace: hermes-agent  
 spec:
   selector:
     app: sreips-rag-mcp
@@ -55,7 +55,7 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: sreips-rag-mcp
-  namespace: sreips-agent
+  namespace: hermes-agent
 spec:
   to:
     kind: Service
