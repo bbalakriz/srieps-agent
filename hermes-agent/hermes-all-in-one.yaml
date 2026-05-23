@@ -1,0 +1,291 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes
+  namespace: hermes-agent
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes-vllm-secret
+  namespace: hermes-agent
+type: Opaque
+stringData:
+  OPENAI_API_KEY: REPLACE_VLLM_API_TOKEN
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes-openrouter-secret
+  namespace: hermes-agent
+type: Opaque
+stringData:
+  OPENROUTER_API_KEY: REPLACE_OPENROUTER_API_KEY
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes-api-secret
+  namespace: hermes-agent
+type: Opaque
+stringData:
+  API_SERVER_KEY: REPLACE_HERMES_API_KEY
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes-config
+  namespace: hermes-agent
+data:
+  config.yaml: |
+    model:
+      provider: "custom"
+      base_url: "REPLACE_VLLM_URL"
+      api_key: "REPLACE_VLLM_API_TOKEN"
+      default: "REPLACE_HERMES_MODEL"
+    fallback_model:
+      provider: "openrouter"
+      model: "google/gemma-4-31b-it:free"
+    terminal:
+      backend: "local"
+      cwd: "/opt/data/workspace"
+      timeout: 180
+      lifetime_seconds: 300
+    compression:
+      enabled: true
+      threshold: 0.50
+      target_ratio: 0.20
+      protect_last_n: 20
+    external_dirs:
+      - /etc/hermes/skills/sreips
+    mcp_servers:
+      ocp_mcp:
+        url: "REPLACE_OCP_MCP_SSE"
+        transport: sse
+        timeout: 300
+        connect_timeout: 15
+        # ocp_mcp read-only RCA whitelist; do not add mutating tools (pods_delete, pods_exec,
+        # pods_run, resources_* write ops, helm_*, configuration_view, namespaces_list, nodes_*)
+        tools:
+          include:
+            - events_list
+            - pods_list
+            - pods_list_in_namespace
+            - pods_get
+            - pods_top
+            - pods_log
+            - resources_list
+            - resources_get
+          resources: false
+          prompts: false
+      rh_kcs_mcp:
+        url: "REPLACE_RH_KCS_SSE"
+        transport: sse
+        timeout: 180
+        connect_timeout: 15
+      sreips_rag:
+        url: "REPLACE_SREIPS_RAG_SSE"
+        transport: sse
+        timeout: 120
+        connect_timeout: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes
+  namespace: hermes-agent
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: hermes
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: hermes
+    spec:
+      containers:
+      - args:
+        - gateway
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: OPENAI_API_KEY
+              name: hermes-vllm-secret
+        - name: OPENROUTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: OPENROUTER_API_KEY
+              name: hermes-openrouter-secret
+        - name: API_SERVER_KEY
+          valueFrom:
+            secretKeyRef:
+              key: API_SERVER_KEY
+              name: hermes-api-secret
+        - name: API_SERVER_ENABLED
+          value: "true"
+        - name: API_SERVER_HOST
+          value: 0.0.0.0
+        - name: API_SERVER_PORT
+          value: "8642"
+        image: nousresearch/hermes-agent:sha-bec2250d2c8349fc85201bcd1aa39bcaa766a555
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          successThreshold: 1
+          tcpSocket:
+            port: 8642
+          timeoutSeconds: 1
+        name: hermes
+        ports:
+        - containerPort: 8642
+          name: api
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 8642
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: "2"
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /opt/data
+          name: hermes-data
+        - mountPath: /opt/data/config.yaml
+          name: hermes-config
+          subPath: config.yaml
+        - mountPath: /etc/hermes/skills/sreips
+          name: sreips-skills
+      initContainers:
+      - name: install-sreips-skills
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -ec
+        - |
+          mkdir -p /skills
+          for f in /src/*; do
+            [ -f "$f" ] || continue
+            skill=$(basename "$f")
+            mkdir -p "/skills/${skill}"
+            cp "$f" "/skills/${skill}/SKILL.md"
+          done
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10000
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: sreips-skills
+          mountPath: /skills
+        - name: sreips-skills-src
+          mountPath: /src
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 10000
+        runAsNonRoot: true
+        runAsUser: 10000
+      serviceAccount: hermes
+      serviceAccountName: hermes
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: hermes-data
+        persistentVolumeClaim:
+          claimName: hermes-data
+      - configMap:
+          defaultMode: 420
+          name: hermes-config
+        name: hermes-config
+      - name: sreips-skills
+        emptyDir: {}
+      - name: sreips-skills-src
+        configMap:
+          name: hermes-sreips-skills
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes
+  namespace: hermes-agent
+spec:
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: api
+    port: 8642
+  selector:
+    app: hermes
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes
+  namespace: hermes-agent
+  annotations:
+    haproxy.router.openshift.io/timeout: 600s
+spec:
+  port:
+    targetPort: api
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  to:
+    kind: Service
+    name: hermes
+    weight: 100
+  wildcardPolicy: None
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: hermes-agent
+  name: hermes-data
+  namespace: hermes-agent
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: gp3-csi
+---
+# bootstrap substitutes REPLACE_* from config.env and captured MCP routes, then oc apply
+# SCC anyuid for hermes SA: bootstrap runs oc adm policy after apply
