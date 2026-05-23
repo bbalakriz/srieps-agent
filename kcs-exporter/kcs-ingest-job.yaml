@@ -11,6 +11,7 @@
 #   2. Stage the ndjson onto the cluster PVC (one-time, or after each re-export):
 #        oc -n llamastack apply -f kcs-data-pvc.yaml
 #        oc apply -f kcs-stage-deployment.yaml
+#        oc -n llamastack scale deployment kcs-stage --replicas=1
 #        
 #        # Wait for the kcs-stage pod to be Running, then:
 #        POD_NAME=$(oc -n llamastack get pods -l app=kcs-stage -o jsonpath='{.items[0].metadata.name}')
