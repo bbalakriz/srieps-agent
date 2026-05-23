@@ -1,4 +1,25 @@
-# ConfigMap hermes-rca-bridge-config and Secret hermes-rca-bridge-secret are created by bootstrap.sh
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hermes-rca-bridge-secret
+  namespace: hermes-agent
+  labels:
+    app: hermes-rca-bridge
+type: Opaque
+stringData:
+  HERMES_API_KEY: REPLACE_HERMES_API_KEY
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-rca-bridge-config
+  namespace: hermes-agent
+  labels:
+    app: hermes-rca-bridge
+data:
+  HERMES_BASE_URL: REPLACE_HERMES_BASE_URL
+  HERMES_MODEL: REPLACE_HERMES_MODEL
+  CLUSTER_NAME: REPLACE_CLUSTER_NAME
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -79,6 +100,8 @@ kind: Route
 metadata:
   name: hermes-rca-bridge
   namespace: hermes-agent
+  annotations:
+    haproxy.router.openshift.io/timeout: 600s
 spec:
   to:
     kind: Service
@@ -87,3 +110,5 @@ spec:
     targetPort: 8000
   tls:
     termination: edge
+---
+# bootstrap substitutes REPLACE_* from config.env and captured Hermes route, then oc apply
