@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: mcp
-          image: quay.io/balki404/rh-kcs-mcp:0.0.8
+          image: quay.io/balki404/sreips-hermes-rhkcs-mcp:0.0.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
