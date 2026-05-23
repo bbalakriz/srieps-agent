@@ -1,0 +1,14 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt rag_mcp_server.py ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+EXPOSE 8000
+ENV LLAMA_STACK_URL=""
+ENV VECTOR_DB_ID="sreips_vector_id"
+
+CMD ["python", "rag_mcp_server.py"]

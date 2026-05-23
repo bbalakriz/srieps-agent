@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sreips-rag-mcp
+  namespace: sreips-agent
+  labels:
+    app: sreips-rag-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sreips-rag-mcp
+  template:
+    metadata:
+      labels:
+        app: sreips-rag-mcp
+    spec:
+      containers:
+        - name: sreips-rag-mcp
+          image: quay.io/balki404/sreips-hermes-rag-mcp:0.0.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: LLAMA_STACK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: sreips-rag-mcp-config
+                  key: LLAMA_STACK_URL
+            - name: VECTOR_DB_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: sreips-rag-mcp-config
+                  key: VECTOR_DB_ID
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sreips-rag-mcp
+  namespace: sreips-agent
+spec:
+  selector:
+    app: sreips-rag-mcp
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: sreips-rag-mcp
+  namespace: sreips-agent
+spec:
+  to:
+    kind: Service
+    name: sreips-rag-mcp
+  port:
+    targetPort: 8000
+  tls:
+    termination: edge
