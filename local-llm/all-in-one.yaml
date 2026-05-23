@@ -1,0 +1,124 @@
+apiVersion: project.openshift.io/v1
+kind: Project
+metadata:
+  labels:
+    kubernetes.io/metadata.name: qwen36-35b-a3b-fp8
+  name: qwen36-35b-a3b-fp8
+spec:
+  finalizers:
+  - kubernetes
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    opendatahub.io/runtime-version: v0.19.1
+    opendatahub.io/serving-runtime-scope: global
+    opendatahub.io/template-display-name: vLLM NVIDIA GPU ServingRuntime for KServe
+    opendatahub.io/template-name: vllm-cuda-runtime-template
+    openshift.io/display-name: vLLM NVIDIA GPU ServingRuntime for KServe
+  labels:
+    opendatahub.io/dashboard: "true"
+  name: qwen36-35b-a3b-fp8
+spec:
+  annotations:
+    opendatahub.io/kserve-runtime: vllm
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+  containers:
+  - args:
+    - --port=8080
+    - --model=/mnt/models
+    - --served-model-name={{.Name}}
+    command:
+    - python3
+    - -m
+    - vllm.entrypoints.openai.api_server
+    env:
+    - name: HOME
+      value: /tmp
+    - name: HF_HOME
+      value: /tmp/hf_home
+    - name: TRITON_CACHE_DIR
+      value: /tmp/.triton
+    - name: XDG_CACHE_HOME
+      value: /tmp/.cache
+    - name: VLLM_CONFIG_ROOT
+      value: /tmp/vllm
+    - name: VLLM_CACHE_ROOT
+      value: /tmp
+    - name: FLASHINFER_WORKSPACE_DIR
+      value: /tmp/flashinfer
+    image: vllm/vllm-openai:v0.19.1
+    name: kserve-container
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+  multiModel: false
+  supportedModelFormats:
+  - autoSelect: true
+    name: vLLM
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  annotations:
+    modelFormat: vLLM
+    opendatahub.io/connections: qwen36-35b
+    opendatahub.io/hardware-profile-name: nvidia-gpu
+    opendatahub.io/hardware-profile-namespace: redhat-ods-applications
+    opendatahub.io/hardware-profile-resource-version: "5241459"
+    opendatahub.io/model-type: generative
+    openshift.io/display-name: Qwen3.6-35B-A3B-FP8
+    security.opendatahub.io/enable-auth: "false"
+    serving.kserve.io/deploymentMode: Standard
+    serving.kserve.io/stop: "false"
+  labels:
+    networking.kserve.io/visibility: exposed
+    opendatahub.io/dashboard: "true"
+  name: qwen36-35b-a3b-fp8
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    deploymentStrategy:
+      type: Recreate
+    maxReplicas: 1
+    minReplicas: 1
+    model:
+      args:
+      - --model=/mnt/models
+      - --served-model-name=qwen36-35b-a3b-fp8
+      - --tensor-parallel-size=1
+      - --max-model-len=65536
+      - --gpu-memory-utilization=0.9
+      - --max-num-batched-tokens=4096
+      - --max-num-seqs=2
+      - --kv-cache-dtype=fp8
+      - --enable-prefix-caching
+      - --enable-auto-tool-choice
+      - --tool-call-parser=qwen3_coder
+      - --reasoning-parser=qwen3
+      - --mm-encoder-tp-mode=data
+      - --mm-processor-cache-type=shm
+      - --default-chat-template-kwargs={"enable_thinking":false}
+      modelFormat:
+        name: vLLM
+      name: ""
+      resources:
+        limits:
+          cpu: "4"
+          memory: 24Gi
+          nvidia.com/gpu: "1"
+        requests:
+          cpu: "2"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+      runtime: qwen36-35b-a3b-fp8
+      storageUri: pvc://qwen-model/qwen36-35b-a3b-fp8
+    timeout: 30
+    tolerations:
+    - effect: NoSchedule
+      key: nvidia.com/gpu
+      operator: Equal
