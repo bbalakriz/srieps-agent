@@ -10,8 +10,12 @@
 # 4. minio
 # 5. ocp-mcp
 # 6. rh-kcs-mcp
-# 7. llamastack
-# 8. sreips-agent (including remediation-agent)
+# 7. milvus
+# 8. postgres
+# 9. llamastack
+# 10. patch rh-kcs-mcp with llamastack URL
+# 11. sreips-rag-mcp
+# 12. hermes agent + hermes-rca-bridge
 #
 # Mattermost is deployed before sreips-core because sreips-core needs the
 # Mattermost bot token in its playbooks config secret. After Mattermost is
@@ -262,6 +266,9 @@ check_prerequisites() {
     
     # SREIPS Agent variables
     [ -z "${VECTOR_DB_ID:-}" ] && missing_vars+=("VECTOR_DB_ID")
+
+    # Hermes agent
+    [ -z "${HERMES_MODEL:-}" ] && missing_vars+=("HERMES_MODEL")
     
     # Mattermost variables (only required when MATTERMOST_ENABLED=true)
     if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
@@ -571,9 +578,8 @@ install_ocp_mcp() {
     wait_for_pod "mcp-servers" "app=ocp-mcp-server" 300
     
     log_info "Capturing OCP MCP endpoint route..."
-    OCP_MCP_ROUTE=$(oc get route ocp-mcp -n mcp-servers -o jsonpath='{.spec.host}')
-    export OCP_MCP_ENDPOINT="https://${OCP_MCP_ROUTE}/sse"
-    log_success "OCP MCP Endpoint: $OCP_MCP_ENDPOINT"
+    export OCP_MCP_ENDPOINT="http://ocp-mcp-server.mcp-servers.svc.cluster.local:8000/sse"
+    log_success "OCP MCP Endpoint (internal): $OCP_MCP_ENDPOINT"
     
     log_success "OpenShift MCP Server installation completed"
 }
@@ -603,9 +609,8 @@ install_rh_kcs_mcp() {
     wait_for_pod "mcp-servers" "app=redhat-api-mcp" 300
     
     log_info "Capturing MCP endpoint route..."
-    MCP_ROUTE=$(oc get route rh-kcs -n mcp-servers -o jsonpath='{.spec.host}')
-    export MCP_ENDPOINT="https://${MCP_ROUTE}/sse"
-    log_success "MCP Endpoint: $MCP_ENDPOINT"
+    export MCP_ENDPOINT="http://redhat-api-mcp.mcp-servers.svc.cluster.local:8000/sse"
+    log_success "RH KCS MCP Endpoint (internal): $MCP_ENDPOINT"
     
     log_success "Red Hat KCS MCP Server installation completed"
 }
@@ -674,15 +679,15 @@ install_llamastack() {
     
     cd "${SCRIPT_DIR}/llamastack" || exit 1
     
-    log_info "Applying rhoai-operator.3.0.0 operator setup..."
+    log_info "Applying rhoai-operator.3.4.0 operator setup..."
     oc apply -f operators-setup.yaml
 
     log_info "Waiting for operator to be installed (60 seconds)..."
     sleep 60 
 
-    log_info "Approving rhoai-operator.3.0.0 operator install plan..."
+    log_info "Approving rhoai-operator.3.4.0 operator install plan..."
     INSTALL_PLAN=$(oc get installplan -n redhat-ods-operator \
-            -o jsonpath='{.items[?(@.spec.clusterServiceVersionNames[0]=="rhods-operator.3.0.0")].metadata.name}')
+            -o jsonpath='{.items[?(@.spec.clusterServiceVersionNames[0]=="rhods-operator.3.4.0")].metadata.name}')
 
     oc patch installplan $INSTALL_PLAN \
         -n redhat-ods-operator \
@@ -690,13 +695,13 @@ install_llamastack() {
         --patch '{"spec":{"approved":true}}'
     
     log_info "Waiting for all relevant rhoai components to be installed (120 seconds)..."
-    sleep 120
+    sleep 30
 
     log_info "Applying data science cluster setup..."
     oc apply -f dsc-setup.yaml
 
     log_info "Waiting for all dsc pods to be installed (180 seconds)..."
-    sleep 180
+    sleep 30
     
     log_info "Creating llamastack namespace..."
     oc new-project llamastack || oc project llamastack
@@ -730,7 +735,7 @@ install_llamastack() {
     oc label secret dashboard-dspa-secret opendatahub.io/dashboard=true -n llamastack --overwrite
     
     log_info "Waiting for Data Science Pipeline server to be ready (this may take up to 6 minutes)..."
-    sleep 360
+    sleep 30
     
     log_info "Capturing LlamaStack route..."
     LLAMA_ROUTE=$(oc get route lsd-llama-milvus-service -n llamastack -o jsonpath='{.spec.host}')
@@ -814,7 +819,7 @@ install_llamastack() {
 }
 
 patch_rh_kcs_mcp_with_llamastack_url() {
-    log_step "9.5: Patching RH KCS MCP with LlamaStack URL"
+    log_step "10: Patching RH KCS MCP with LlamaStack URL"
     
     log_info "Updating rh-kcs-mcp deployment with LLAMA_STACK_URL and KCS_MODE..."
     oc set env deployment/redhat-api-mcp \
@@ -831,60 +836,188 @@ patch_rh_kcs_mcp_with_llamastack_url() {
     log_success "RH KCS MCP patched with LlamaStack URL"
 }
 
-install_sreips_agent() {
-    log_step "10: Installing SREIPS Agent and Remediation Agent"
-    
-    cd "${SCRIPT_DIR}/sreips-agent" || exit 1
-    
-    log_info "Creating sreips-agent namespace..."
-    oc new-project sreips-agent || oc project sreips-agent
-    
-    log_info "Applying SREIPS Agent manifests (includes remediation agent)..."
-    oc apply -f all-in-one.yaml -n sreips-agent
-    
-    log_info "Patching sreips-agent-config ConfigMap with captured URLs and config.env values..."
-    oc create configmap sreips-agent-config \
+capture_hermes_base_url() {
+    local hermes_route
+    hermes_route=$(oc get route hermes -n hermes-agent -o jsonpath='{.spec.host}' 2>/dev/null)
+    if [ -z "$hermes_route" ]; then
+        log_error "Hermes route 'hermes' not found in hermes-agent namespace"
+        return 1
+    fi
+    export HERMES_BASE_URL="https://${hermes_route}"
+    log_success "Hermes URL captured from route: $HERMES_BASE_URL"
+}
+
+install_sreips_rag_mcp() {
+    log_step "11: Installing SREIPS RAG MCP (enterprise KB bridge)"
+
+    cd "${SCRIPT_DIR}/sreips-rag-mcp" || exit 1
+
+    oc new-project hermes-agent 2>/dev/null || oc project hermes-agent
+
+    log_info "Creating sreips-rag-mcp-config..."
+    oc create configmap sreips-rag-mcp-config \
         --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_URL" \
-        --from-literal=MCP_ENDPOINT="$MCP_ENDPOINT" \
-        --from-literal=VECTOR_DB_ID="$VECTOR_DB_ID" \
-        --from-literal=MODEL_ID="$MODEL_ID" \
-        -n sreips-agent \
+        --from-literal=VECTOR_DB_ID="${VECTOR_DB_ID:-sreips_vector_id}" \
+        -n hermes-agent \
         --dry-run=client -o yaml | oc apply -f -
-    
-    log_info "Patching remediation-agent-config ConfigMap with captured URLs..."
-    oc create configmap remediation-agent-config \
-        --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_URL" \
-        --from-literal=OCP_MCP_ENDPOINT="$OCP_MCP_ENDPOINT" \
-        --from-literal=MCP_TOOL_LOGGING="$MCP_TOOL_LOGGING" \
-        --from-literal=MODEL_ID="$MODEL_ID" \
-        -n sreips-agent \
+
+    log_info "Applying SREIPS RAG MCP manifests..."
+    oc apply -f all-in-one.yaml -n hermes-agent
+
+    log_info "Waiting for sreips-rag-mcp pod..."
+    wait_for_pod "hermes-agent" "app=sreips-rag-mcp" 300
+
+    export SREIPS_RAG_MCP_INTERNAL="http://sreips-rag-mcp.hermes-agent.svc.cluster.local:8000/sse"
+    log_success "SREIPS RAG MCP ready: $SREIPS_RAG_MCP_INTERNAL"
+}
+
+create_hermes_sreips_skills_configmap() {
+    local skills_dir="${SCRIPT_DIR}/hermes-skills/sreips"
+    local cm_args=()
+    local skill_dir
+
+    if [ ! -d "$skills_dir" ]; then
+        log_error "Skills directory not found: $skills_dir"
+        return 1
+    fi
+
+    for skill_dir in "${skills_dir}"/*/; do
+        [ -f "${skill_dir}SKILL.md" ] || continue
+        cm_args+=( "--from-file=$(basename "$skill_dir")=${skill_dir}SKILL.md" )
+    done
+
+    if [ "${#cm_args[@]}" -eq 0 ]; then
+        log_error "No SKILL.md files under ${skills_dir}"
+        return 1
+    fi
+
+    oc create configmap hermes-sreips-skills \
+        "${cm_args[@]}" \
+        -n hermes-agent \
         --dry-run=client -o yaml | oc apply -f -
-    
-    log_info "Restarting SREIPS Agent deployment to pick up new configuration..."
-    oc rollout restart deployment/sreips-agent -n sreips-agent
-    oc rollout status deployment/sreips-agent -n sreips-agent --timeout=300s
-    
-    log_info "Restarting Remediation Agent deployment to pick up new configuration..."
-    oc rollout restart deployment/remediation-agent -n sreips-agent
-    oc rollout status deployment/remediation-agent -n sreips-agent --timeout=300s
-    
-    log_info "Waiting for SREIPS Agent pod to be ready..."
-    wait_for_pod "sreips-agent" "app=sreips-agent" 300
-    
-    log_info "Waiting for Remediation Agent pod to be ready..."
-    wait_for_pod "sreips-agent" "app=remediation-agent" 300
-    
-    log_info "Capturing SREIPS Agent route..."
-    SREIPS_AGENT_ROUTE=$(oc get route sreips-agent -n sreips-agent -o jsonpath='{.spec.host}')
-    export SREIPS_AGENT_URL="https://${SREIPS_AGENT_ROUTE}"
-    log_success "SREIPS Agent URL: $SREIPS_AGENT_URL"
-    
-    log_info "Capturing Remediation Agent route..."
-    REMEDIATION_AGENT_ROUTE=$(oc get route remediation-agent -n sreips-agent -o jsonpath='{.spec.host}')
-    export REMEDIATION_AGENT_URL="https://${REMEDIATION_AGENT_ROUTE}"
-    log_success "Remediation Agent URL: $REMEDIATION_AGENT_URL"
-    
-    log_success "SREIPS Agent and Remediation Agent installation completed"
+}
+
+apply_hermes_all_in_one() {
+    local manifest ocp_sse kcs_sse rag_sse model openrouter_key rendered
+    manifest="${SCRIPT_DIR}/hermes-agent/hermes-all-in-one.yaml"
+
+    ocp_sse="${OCP_MCP_ENDPOINT:-http://ocp-mcp-server.mcp-servers.svc.cluster.local:8000/sse}"
+    kcs_sse="${MCP_ENDPOINT:-http://redhat-api-mcp.mcp-servers.svc.cluster.local:8000/sse}"
+    rag_sse="${SREIPS_RAG_MCP_INTERNAL:-http://sreips-rag-mcp.hermes-agent.svc.cluster.local:8000/sse}"
+    model="${HERMES_MODEL:-${INFERENCE_MODEL}}"
+    openrouter_key="${OPENROUTER_APIKEY:-${OPENROUTER_API_TOKEN:-}}"
+
+    if [ -z "${OCP_MCP_ENDPOINT:-}" ] || [ -z "${MCP_ENDPOINT:-}" ]; then
+        log_warning "OCP_MCP_ENDPOINT or MCP_ENDPOINT not set; Hermes MCP URLs may be wrong"
+    fi
+    if [ -z "$openrouter_key" ]; then
+        log_warning "OPENROUTER_APIKEY not set; hermes-openrouter-secret will use placeholder"
+        openrouter_key="replace-me"
+    fi
+
+    if [ ! -f "$manifest" ]; then
+        log_error "Hermes manifest not found: $manifest"
+        return 1
+    fi
+
+    rendered=$(mktemp)
+    sed -e "s|REPLACE_VLLM_URL|${VLLM_URL}|g" \
+        -e "s|REPLACE_HERMES_MODEL|${model}|g" \
+        -e "s|REPLACE_OCP_MCP_SSE|${ocp_sse}|g" \
+        -e "s|REPLACE_RH_KCS_SSE|${kcs_sse}|g" \
+        -e "s|REPLACE_SREIPS_RAG_SSE|${rag_sse}|g" \
+        -e "s|REPLACE_VLLM_API_TOKEN|${VLLM_API_TOKEN}|g" \
+        -e "s|REPLACE_OPENROUTER_API_KEY|${openrouter_key}|g" \
+        -e "s|REPLACE_HERMES_API_KEY|${HERMES_API_KEY}|g" \
+        "$manifest" >"$rendered"
+
+    oc apply -f "$rendered" -n hermes-agent
+    rm -f "$rendered"
+    log_success "Hermes agent manifests applied"
+}
+
+ensure_hermes_api_key() {
+    if [ -n "${HERMES_API_KEY:-}" ]; then
+        return 0
+    fi
+    HERMES_API_KEY="$(openssl rand -hex 32)"
+    export HERMES_API_KEY
+    log_warning "HERMES_API_KEY was not set; generated a new API key for Hermes agent and RCA bridge"
+    log_info "Add to config.env: export HERMES_API_KEY=\"${HERMES_API_KEY}\""
+}
+
+install_hermes_agent() {
+    ensure_hermes_api_key
+    create_hermes_sreips_skills_configmap
+
+    if oc get deployment hermes -n hermes-agent &>/dev/null; then
+        log_info "Hermes agent already deployed; applying updated manifests"
+    else
+        log_info "Deploying Hermes agent (hermes-all-in-one.yaml)..."
+    fi
+
+    apply_hermes_all_in_one
+
+    oc adm policy add-scc-to-user anyuid -z hermes -n hermes-agent 2>/dev/null \
+        || log_warning "Could not add anyuid SCC to hermes SA (may already exist)"
+
+    # always restart so pods pick up SCC on first install (apply runs before SCC grant)
+    oc rollout restart deployment/hermes -n hermes-agent
+    oc rollout status deployment/hermes -n hermes-agent --timeout=300s
+
+    log_info "Waiting for Hermes agent pod..."
+    wait_for_pod "hermes-agent" "app=hermes" 300
+
+    capture_hermes_base_url || return 1
+    log_success "Hermes agent deployed"
+}
+
+apply_hermes_rca_bridge() {
+    local manifest model cluster_name rendered
+    manifest="${SCRIPT_DIR}/hermes-rca-bridge/all-in-one.yaml"
+    model="${HERMES_MODEL:-Qwen3.6-35B-A3B}"
+    cluster_name="${CLUSTER_NAME:-openshift}"
+
+    if [ ! -f "$manifest" ]; then
+        log_error "Hermes RCA bridge manifest not found: $manifest"
+        return 1
+    fi
+
+    if [ -z "${HERMES_BASE_URL:-}" ]; then
+        log_error "HERMES_BASE_URL is empty; Hermes route must exist before deploying the RCA bridge"
+        return 1
+    fi
+
+    rendered=$(mktemp)
+    sed -e "s|REPLACE_HERMES_BASE_URL|${HERMES_BASE_URL}|g" \
+        -e "s|REPLACE_HERMES_MODEL|${model}|g" \
+        -e "s|REPLACE_CLUSTER_NAME|${cluster_name}|g" \
+        -e "s|REPLACE_HERMES_API_KEY|${HERMES_API_KEY:-}|g" \
+        "$manifest" >"$rendered"
+
+    oc apply -f "$rendered" -n hermes-agent
+    rm -f "$rendered"
+    log_success "Hermes RCA bridge manifests applied"
+}
+
+install_hermes_rca_stack() {
+    log_step "12: Installing Hermes agent, RCA bridge, and SREIPS skills"
+
+    oc new-project hermes-agent 2>/dev/null || oc project hermes-agent
+
+    install_hermes_agent || return 1
+
+    log_info "Deploying Hermes RCA bridge (all-in-one.yaml)..."
+    apply_hermes_rca_bridge
+
+    log_info "Waiting for hermes-rca-bridge pod..."
+    wait_for_pod "hermes-agent" "app=hermes-rca-bridge" 300
+
+    export HERMES_RCA_URL="http://hermes-rca-bridge.hermes-agent.svc.cluster.local:8000"
+    log_success "Hermes RCA bridge URL: $HERMES_RCA_URL"
+
+    log_info "Verify Hermes agent:"
+    log_info "  oc -n hermes-agent exec deploy/hermes -- ls -laR /etc/hermes/skills/sreips"
 }
 
 # print offline KCS ingest steps when KCS_MODE is offline (default)
@@ -938,9 +1071,9 @@ main() {
     
     # now config.env is sourced - log the component list and sequence
     if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
-        log_info "This process will install: mattermost, sreips-core, minio, ocp-mcp, rh-kcs-mcp, milvus, postgres, llamastack, sreips-agent, remediation-agent"
+        log_info "This process will install: mattermost, sreips-core, minio, ocp-mcp, rh-kcs-mcp, milvus, postgres, llamastack, sreips-rag-mcp, hermes agent, hermes-rca-bridge"
     else
-        log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, milvus, postgres, llamastack, sreips-agent, remediation-agent"
+        log_info "This process will install: sreips-core, minio, ocp-mcp, rh-kcs-mcp, milvus, postgres, llamastack, sreips-rag-mcp, hermes agent, hermes-rca-bridge"
     fi
     
     # deploy Mattermost before sreips-core so the bot token is available
@@ -958,26 +1091,27 @@ main() {
     install_postgres
     install_llamastack
     patch_rh_kcs_mcp_with_llamastack_url
-    install_sreips_agent
+
+    install_sreips_rag_mcp
+    install_hermes_rca_stack
     
     # Final summary
     log_step "Installation Complete!"
     log_success "All SREIPS components have been successfully installed"
     echo ""
     log_info "Component URLs:"
-    log_info "  - SREIPS Agent: $SREIPS_AGENT_URL"
-    log_info "  - Remediation Agent: $REMEDIATION_AGENT_URL"
     log_info "  - LlamaStack: $LLAMA_STACK_URL"
     log_info "  - RH KCS MCP Server: $MCP_ENDPOINT"
     log_info "  - OCP MCP Server: $OCP_MCP_ENDPOINT"
+    log_info "  - Hermes RCA bridge: ${HERMES_RCA_URL:-http://hermes-rca-bridge.hermes-agent.svc.cluster.local:8000}"
+    log_info "  - Hermes agent: ${HERMES_BASE_URL:-not captured yet}"
     if [ "${MATTERMOST_ENABLED:-false}" = "true" ]; then
         log_info "  - Mattermost: $MATTERMOST_URL"
     fi
     echo ""
-    log_info "You can now test the SREIPS agent with:"
-    echo "  curl -X POST $SREIPS_AGENT_URL/query \\"
+    echo "  curl -X POST ${HERMES_RCA_URL:-http://hermes-rca-bridge.hermes-agent.svc.cluster.local:8000}/analyze \\"
     echo "    -H \"Content-Type: application/json\" \\"
-    echo "    -d '{\"query\": \"CrashLoopBackOff OpenShift pod\"}'"
+    echo "    -d '{\"event_reason\":\"CrashLoopBackOff\",\"resource_kind\":\"Pod\",\"search_query\":\"CrashLoopBackOff Pod OpenShift\"}'"
     echo ""
 
     print_offline_kcs_ingest_reminder
