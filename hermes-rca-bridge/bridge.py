@@ -168,82 +168,85 @@ def _call_hermes(messages: list[dict[str, str]]) -> str:
     return content
 
 
+_DIVIDER = "─────────────────────────────────────────────"
+
+
+def _heading(text: str) -> str:
+    return f"*▸ {text}*"
+
+
 def _report_to_slack(report: RcaReport) -> str:
-    sections: list[str] = []
+    parts: list[str] = []
+
+    def add_section(lines: list[str]) -> None:
+        if parts:
+            parts.append(_DIVIDER)
+        parts.extend(lines)
 
     if report.summary:
-        sections.extend(["*Summary*", report.summary, ""])
+        add_section([_heading("Summary"), report.summary])
 
     if report.root_cause:
-        sections.extend(["*Root Cause*", report.root_cause, ""])
+        add_section([_heading("Root Cause"), report.root_cause])
 
     if report.confidence:
-        sections.extend([f"*Confidence:* {report.confidence}", ""])
+        add_section([f"*Confidence:* {report.confidence}"])
 
     if report.symptoms:
-        sections.append("*Symptoms*")
-        sections.extend(f"• {s}" for s in report.symptoms[:6])
-        sections.append("")
+        add_section([_heading("Symptoms")] + [f"• {s}" for s in report.symptoms[:6]])
 
     if report.contributing_factors:
-        sections.append("*Contributing Factors*")
-        sections.extend(f"• {f}" for f in report.contributing_factors[:6])
-        sections.append("")
+        add_section(
+            [_heading("Contributing Factors")] + [f"• {f}" for f in report.contributing_factors[:6]]
+        )
 
     if report.evidence:
-        sections.append("*Evidence*")
+        lines = [_heading("Evidence")]
         for e in report.evidence[:8]:
-            detail = e.detail[:400]
             source = e.source or "cluster"
-            sections.append(f"• _{source}_ — {detail}")
-        sections.append("")
+            lines.append(f"• _{source}_ — {e.detail}")
+        add_section(lines)
 
     if report.recommended_actions:
-        sections.append("*Recommended Actions*")
+        lines = [_heading("Recommended Actions")]
         for a in report.recommended_actions[:6]:
-            line = f"• *[{a.priority}]* {a.action}"
-            sections.append(line)
+            lines.append(f"• *[{a.priority}]* {a.action}")
             if a.verification:
-                sections.append(f"  _verify:_ {a.verification[:200]}")
-        sections.append("")
+                lines.append(f"  _verify:_ {a.verification}")
+        add_section(lines)
 
     if report.enterprise_kb:
-        sections.append("*Enterprise Knowledge Base*")
+        lines = [_heading("Enterprise Knowledge Base")]
         for k in report.enterprise_kb[:4]:
             title = k.title or "KB article"
             excerpt = (k.excerpt or "").strip()
+            lines.append(f"• *{title}*")
             if excerpt:
-                sections.append(f"• *{title}*")
-                sections.append(f"  {excerpt[:300]}")
-            else:
-                sections.append(f"• *{title}*")
-        sections.append("")
+                lines.append(f"  {excerpt}")
+        add_section(lines)
 
     if report.kcs_articles:
-        sections.append("*Red Hat KCS*")
+        lines = [_heading("Red Hat KCS")]
         for k in report.kcs_articles[:6]:
             title = k.title or "KCS article"
             kcs_id = k.id or ""
             uri = k.view_uri or (f"https://access.redhat.com/solutions/{kcs_id}" if kcs_id else "")
             if uri:
                 id_suffix = f" · `{kcs_id}`" if kcs_id else ""
-                sections.append(f"• <{uri}|{title}>{id_suffix}")
+                lines.append(f"• <{uri}|{title}>{id_suffix}")
             else:
-                sections.append(f"• {title}" + (f" · `{kcs_id}`" if kcs_id else ""))
+                lines.append(f"• {title}" + (f" · `{kcs_id}`" if kcs_id else ""))
             relevance = (k.relevance or "").strip()
             if relevance:
-                sections.append(f"  _relevance:_ {relevance[:200]}")
-        sections.append("")
+                lines.append(f"  _relevance:_ {relevance}")
+        add_section(lines)
 
     if report.open_questions:
-        sections.append("*Open Questions*")
-        sections.extend(f"• {q}" for q in report.open_questions[:4])
-        sections.append("")
+        add_section(
+            [_heading("Open Questions")] + [f"• {q}" for q in report.open_questions[:4]]
+        )
 
-    while sections and sections[-1] == "":
-        sections.pop()
-
-    return "\n".join(sections)
+    return "\n".join(parts)
 
 
 def _report_to_combined(report: RcaReport, slack_md: str) -> str:
