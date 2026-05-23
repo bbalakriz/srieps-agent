@@ -321,7 +321,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.6'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -344,7 +344,7 @@ deploymentSpec:
           \ == \".pdf\"\n    ]\n\n    print(f\"Found PDFs for processing:\" , all_pdfs)\n\
           \n    splits = [\n        batch for batch in (all_pdfs[i::num_splits] for\
           \ i in range(num_splits)) if batch\n    ]\n    return splits or [[]]\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.2
+        image: quay.io/balki404/docling-pipeline:0.0.6
     exec-docling-convert:
       container:
         args:
@@ -357,10 +357,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'docling>=2.43.0'\
-          \ 'transformers' 'sentence-transformers' 'llama-stack==0.3.1' 'llama-stack-client==0.3.1'\
-          \ 'pymilvus' 'fire' 'rapidocr-onnxruntime' 'rapidocr' 'onnxruntime'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.6'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -377,62 +374,93 @@ deploymentSpec:
           \ *\n\ndef docling_convert(\n    input_path: dsl.InputPath(\"input-pdfs\"\
           ),\n    pdf_split: List[str],\n    output_path: dsl.OutputPath(\"output-md\"\
           ),\n    embed_model_id: str,\n    max_tokens: int,\n    service_url: str,\n\
-          \    vector_store_id: str,\n):\n    import pathlib  \n    import hashlib\
-          \  \n    import json  \n    import logging  \n    from typing import List\
-          \  \n\n    from docling.datamodel.base_models import InputFormat, ConversionStatus\
-          \  \n    from docling.datamodel.pipeline_options import PdfPipelineOptions,\
-          \ RapidOcrOptions  \n    from docling.document_converter import DocumentConverter,\
-          \ PdfFormatOption  \n    from transformers import AutoTokenizer  \n    from\
-          \ sentence_transformers import SentenceTransformer  \n    from docling.chunking\
-          \ import HybridChunker  \n    from llama_stack_client import LlamaStackClient\
-          \  \n    from llama_stack_client import RAGDocument  \n\n    _log = logging.getLogger(__name__)\
-          \  \n\n    def setup_chunker_and_embedder(embed_model_id: str, max_tokens:\
-          \ int):  \n        \"\"\"Initialize the custom chunker and embedding model\"\
-          \"\"  \n        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)\
+          \    vector_store_id: str,\n):\n    import os\n    import pathlib\n    import\
+          \ hashlib\n    import json\n    import logging\n    from typing import List\n\
+          \n    # openshift runs as uid 1001; default HF cache under $HOME is not\
+          \ writable\n    hf_cache = os.environ.get(\n        \"HF_HOME\", \"/opt/app-root/model-cache/huggingface\"\
+          \n    )\n    st_cache = os.environ.get(\n        \"SENTENCE_TRANSFORMERS_HOME\"\
+          ,\n        \"/opt/app-root/model-cache/sentence-transformers\",\n    )\n\
+          \    for path in (hf_cache, st_cache):\n        os.makedirs(path, exist_ok=True)\n\
+          \    os.environ[\"HF_HOME\"] = hf_cache\n    os.environ[\"TRANSFORMERS_CACHE\"\
+          ] = hf_cache\n    os.environ[\"HUGGINGFACE_HUB_CACHE\"] = hf_cache\n   \
+          \ os.environ[\"SENTENCE_TRANSFORMERS_HOME\"] = st_cache\n\n    from docling.datamodel.base_models\
+          \ import InputFormat, ConversionStatus\n    from docling.datamodel.pipeline_options\
+          \ import PdfPipelineOptions, RapidOcrOptions\n    from docling.document_converter\
+          \ import DocumentConverter, PdfFormatOption\n    from transformers import\
+          \ AutoTokenizer\n    from sentence_transformers import SentenceTransformer\n\
+          \    from docling.chunking import HybridChunker\n    from llama_stack_client\
+          \ import LlamaStackClient\n\n    def setup_rapidocr_options() -> RapidOcrOptions:\n\
+          \        rapidocr_dir = os.environ.get(\n            \"RAPIDOCR_MODEL_DIR\"\
+          , \"/opt/app-root/model-cache/rapidocr\"\n        )\n        os.makedirs(rapidocr_dir,\
+          \ exist_ok=True)\n        root = pathlib.Path(rapidocr_dir)\n\n        def\
+          \ first_match(*patterns: str) -> str | None:\n            for pattern in\
+          \ patterns:\n                matches = sorted(root.rglob(pattern))\n   \
+          \             if matches:\n                    return str(matches[0])\n\
+          \            return None\n\n        det = first_match(\"ch_PP-OCRv4_det_mobile.onnx\"\
+          , \"*det*.onnx\")\n        cls = first_match(\"ch_ppocr_mobile_v2.0_cls_infer.onnx\"\
+          , \"*cls*.onnx\")\n        rec = first_match(\"ch_PP-OCRv4_rec_mobile_infer.onnx\"\
+          , \"*rec*.onnx\")\n        keys = first_match(\"*dict*.txt\", \"*keys*.txt\"\
+          )\n\n        kwargs: dict = {}\n        if det:\n            kwargs[\"det_model_path\"\
+          ] = det\n        if cls:\n            kwargs[\"cls_model_path\"] = cls\n\
+          \        if rec:\n            kwargs[\"rec_model_path\"] = rec\n       \
+          \ if keys:\n            kwargs[\"rec_keys_path\"] = keys\n        if not\
+          \ kwargs:\n            kwargs[\"rapidocr_params\"] = {\"Global.model_root_dir\"\
+          : rapidocr_dir}\n        return RapidOcrOptions(**kwargs)\n\n    _log =\
+          \ logging.getLogger(__name__)\n\n    def setup_chunker_and_embedder(embed_model_id:\
+          \ str, max_tokens: int):  \n        \"\"\"Initialize the custom chunker\
+          \ and embedding model\"\"\"  \n        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)\
           \  \n        embedding_model = SentenceTransformer(embed_model_id)  \n \
           \       chunker = HybridChunker(  \n            tokenizer=tokenizer, max_tokens=max_tokens,\
           \ merge_peers=True  \n        )  \n        return embedding_model, chunker\
           \  \n\n    def embed_text(text: str, embedding_model) -> List[float]:  \n\
           \        \"\"\"Generate embedding for text using the custom model\"\"\"\
           \  \n        return embedding_model.encode([text], normalize_embeddings=True).tolist()[0]\
-          \  \n\n    def process_and_insert_with_custom_chunking(  \n        conv_results,\
-          \   \n        vector_store_id: str,   \n        embed_model_id: str,  \n\
-          \        max_tokens: int = 512  \n    ):  \n        \"\"\"Process documents\
-          \ using custom chunker and embedding model\"\"\"  \n        processed_docs\
-          \ = 0  \n\n        # Initialize custom chunker and embedder  \n        embedding_model,\
-          \ chunker = setup_chunker_and_embedder(embed_model_id, max_tokens)  \n\n\
-          \        for conv_res in conv_results:  \n            file_name = conv_res.input.file.stem\
-          \  \n\n            if conv_res.status != ConversionStatus.SUCCESS:  \n \
-          \               _log.warning(f\"Conversion failed for {file_name}: {conv_res.status}\"\
-          )  \n                continue  \n\n            document = conv_res.document\
-          \  \n            if document is None:  \n                _log.warning(f\"\
-          Document conversion returned None for {file_name}\")  \n               \
-          \ continue  \n\n            processed_docs += 1  \n\n            # Create\
-          \ RAGDocuments from custom chunks  \n            rag_documents = []  \n\n\
-          \            for chunk in chunker.chunk(dl_doc=document):  \n          \
-          \      if chunk is None:  \n                    continue  \n\n         \
-          \       raw_chunk = chunker.contextualize(chunk)  \n                if not\
-          \ raw_chunk or not raw_chunk.strip():  \n                    continue  \n\
-          \n                # Generate chunk_id from document + chunk text hash  \n\
-          \                chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()\
-          \  \n\n                # Create RAGDocument  \n                rag_doc =\
-          \ RAGDocument(  \n                    document_id=chunk_id,  \n        \
-          \            content=raw_chunk,  \n                    metadata={  \n  \
-          \                      \"document_id\": file_name,  \n                 \
-          \       \"file_name\": file_name,  \n                        \"chunk_id\"\
-          : chunk_id,  \n                        \"source\": \"docling_hybrid_chunker\"\
-          \  \n                    }  \n                )  \n                rag_documents.append(rag_doc)\
-          \  \n\n            # Insert using the tool runtime API  \n            if\
-          \ rag_documents:  \n                try:  \n                    client =\
-          \ LlamaStackClient(base_url=service_url)    \n                    client.tool_runtime.rag_tool.insert(\
-          \  \n                        documents=rag_documents,  \n              \
-          \          vector_db_id=vector_store_id,  \n                        chunk_size_in_tokens=max_tokens\
-          \  \n                    )  \n                    _log.info(f\"Inserted\
-          \ {len(rag_documents)} chunks for {file_name}\")  \n                except\
-          \ Exception as e:  \n                    _log.error(f\"Failed to insert\
-          \ chunks for {file_name}: {e}\")  \n\n        _log.info(f\"Processed {processed_docs}\
-          \ documents successfully.\") \n\n    # Main logic starts here\n    input_path\
-          \ = pathlib.Path(input_path)\n    output_path = pathlib.Path(output_path)\n\
+          \  \n\n    def resolve_stack_embedding_model(client, provider_embed_id:\
+          \ str) -> tuple[str, int]:\n        for m in client.models.list():\n   \
+          \         md = m.custom_metadata or {}\n            if md.get(\"model_type\"\
+          ) != \"embedding\":\n                continue\n            if md.get(\"\
+          provider_resource_id\") == provider_embed_id or m.id.endswith(\n       \
+          \         \"/\" + provider_embed_id\n            ):\n                return\
+          \ m.id, int(md.get(\"embedding_dimension\", 768))\n        raise ValueError(f\"\
+          Embedding model '{provider_embed_id}' not found on LlamaStack\")\n\n   \
+          \ def process_and_insert_with_custom_chunking(\n        conv_results,\n\
+          \        vector_store_id: str,\n        embed_model_id: str,\n        max_tokens:\
+          \ int = 512,\n        batch_size: int = 32,\n    ):\n        \"\"\"Process\
+          \ documents using custom chunker and precomputed embeddings.\"\"\"\n   \
+          \     processed_docs = 0\n        client = LlamaStackClient(base_url=service_url)\n\
+          \        stack_model_id, embedding_dim = resolve_stack_embedding_model(client,\
+          \ embed_model_id)\n        embedding_model, chunker = setup_chunker_and_embedder(embed_model_id,\
+          \ max_tokens)\n\n        for conv_res in conv_results:\n            file_name\
+          \ = conv_res.input.file.stem\n\n            if conv_res.status != ConversionStatus.SUCCESS:\n\
+          \                _log.warning(f\"Conversion failed for {file_name}: {conv_res.status}\"\
+          )\n                continue\n\n            document = conv_res.document\n\
+          \            if document is None:\n                _log.warning(f\"Document\
+          \ conversion returned None for {file_name}\")\n                continue\n\
+          \n            processed_docs += 1\n            chunks = []\n\n         \
+          \   for chunk in chunker.chunk(dl_doc=document):\n                if chunk\
+          \ is None:\n                    continue\n\n                raw_chunk =\
+          \ chunker.contextualize(chunk)\n                if not raw_chunk or not\
+          \ raw_chunk.strip():\n                    continue\n\n                chunk_id\
+          \ = hashlib.sha256(f\"{file_name}:{raw_chunk}\".encode()).hexdigest()\n\
+          \                chunks.append(\n                    {\n               \
+          \         \"chunk_id\": chunk_id,\n                        \"content\":\
+          \ raw_chunk,\n                        \"chunk_metadata\": {\n          \
+          \                  \"document_id\": file_name,\n                       \
+          \     \"file_name\": file_name,\n                            \"chunk_id\"\
+          : chunk_id,\n                            \"source\": \"docling_hybrid_chunker\"\
+          ,\n                        },\n                        \"embedding\": embed_text(raw_chunk,\
+          \ embedding_model),\n                        \"embedding_model\": stack_model_id,\n\
+          \                        \"embedding_dimension\": embedding_dim,\n     \
+          \               }\n                )\n\n            if not chunks:\n   \
+          \             continue\n\n            try:\n                for i in range(0,\
+          \ len(chunks), batch_size):\n                    client.vector_io.insert(\n\
+          \                        vector_store_id=vector_store_id,\n            \
+          \            chunks=chunks[i : i + batch_size],\n                    )\n\
+          \                _log.info(f\"Inserted {len(chunks)} chunks for {file_name}\"\
+          )\n            except Exception as e:\n                _log.error(f\"Failed\
+          \ to insert chunks for {file_name}: {e}\")\n\n        _log.info(f\"Processed\
+          \ {processed_docs} documents successfully.\")\n\n    # Main logic starts\
+          \ here\n    input_path = pathlib.Path(input_path)\n    output_path = pathlib.Path(output_path)\n\
           \    output_path.mkdir(parents=True, exist_ok=True)\n\n    # Build absolute\
           \ paths for the PDFs\n    input_pdfs = list(input_path.rglob(\"*.pdf\"))\n\
           \n    # Ensure only valid, non-empty PDFs are kept\n    input_pdfs = [p\
@@ -442,8 +470,8 @@ deploymentSpec:
           \ when they are\n    # not provided in PdfPipelineOptions initialization\n\
           \    pipeline_options = PdfPipelineOptions()\n    pipeline_options.do_ocr\
           \ = True\n    pipeline_options.generate_page_images = True\n    pipeline_options.ocr_options\
-          \ = RapidOcrOptions()\n\n    doc_converter = DocumentConverter(\n      \
-          \  format_options={\n            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)\n\
+          \ = setup_rapidocr_options()\n\n    doc_converter = DocumentConverter(\n\
+          \        format_options={\n            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)\n\
           \        }\n    )\n\n    print(\"PDFs for conversion:\")\n    for p in input_pdfs:\n\
           \        print(f\" - {p} (exists={p.exists()}, size={p.stat().st_size if\
           \ p.exists() else 'N/A'})\")\n\n    conv_results = doc_converter.convert_all(\n\
@@ -452,7 +480,7 @@ deploymentSpec:
           \    process_and_insert_with_custom_chunking( conv_results=conv_results,\
           \  \n        vector_store_id=vector_store_id,  \n        embed_model_id=embed_model_id,\
           \  \n        max_tokens=512)\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.2
+        image: quay.io/balki404/docling-pipeline:0.0.6
         resources:
           accelerator:
             count: '1'
@@ -479,10 +507,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'docling>=2.43.0'\
-          \ 'transformers' 'sentence-transformers' 'llama-stack==0.3.1' 'llama-stack-client==0.3.1'\
-          \ 'pymilvus' 'fire' 'rapidocr-onnxruntime' 'rapidocr' 'onnxruntime'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.6'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -499,62 +524,93 @@ deploymentSpec:
           \ *\n\ndef docling_convert(\n    input_path: dsl.InputPath(\"input-pdfs\"\
           ),\n    pdf_split: List[str],\n    output_path: dsl.OutputPath(\"output-md\"\
           ),\n    embed_model_id: str,\n    max_tokens: int,\n    service_url: str,\n\
-          \    vector_store_id: str,\n):\n    import pathlib  \n    import hashlib\
-          \  \n    import json  \n    import logging  \n    from typing import List\
-          \  \n\n    from docling.datamodel.base_models import InputFormat, ConversionStatus\
-          \  \n    from docling.datamodel.pipeline_options import PdfPipelineOptions,\
-          \ RapidOcrOptions  \n    from docling.document_converter import DocumentConverter,\
-          \ PdfFormatOption  \n    from transformers import AutoTokenizer  \n    from\
-          \ sentence_transformers import SentenceTransformer  \n    from docling.chunking\
-          \ import HybridChunker  \n    from llama_stack_client import LlamaStackClient\
-          \  \n    from llama_stack_client import RAGDocument  \n\n    _log = logging.getLogger(__name__)\
-          \  \n\n    def setup_chunker_and_embedder(embed_model_id: str, max_tokens:\
-          \ int):  \n        \"\"\"Initialize the custom chunker and embedding model\"\
-          \"\"  \n        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)\
+          \    vector_store_id: str,\n):\n    import os\n    import pathlib\n    import\
+          \ hashlib\n    import json\n    import logging\n    from typing import List\n\
+          \n    # openshift runs as uid 1001; default HF cache under $HOME is not\
+          \ writable\n    hf_cache = os.environ.get(\n        \"HF_HOME\", \"/opt/app-root/model-cache/huggingface\"\
+          \n    )\n    st_cache = os.environ.get(\n        \"SENTENCE_TRANSFORMERS_HOME\"\
+          ,\n        \"/opt/app-root/model-cache/sentence-transformers\",\n    )\n\
+          \    for path in (hf_cache, st_cache):\n        os.makedirs(path, exist_ok=True)\n\
+          \    os.environ[\"HF_HOME\"] = hf_cache\n    os.environ[\"TRANSFORMERS_CACHE\"\
+          ] = hf_cache\n    os.environ[\"HUGGINGFACE_HUB_CACHE\"] = hf_cache\n   \
+          \ os.environ[\"SENTENCE_TRANSFORMERS_HOME\"] = st_cache\n\n    from docling.datamodel.base_models\
+          \ import InputFormat, ConversionStatus\n    from docling.datamodel.pipeline_options\
+          \ import PdfPipelineOptions, RapidOcrOptions\n    from docling.document_converter\
+          \ import DocumentConverter, PdfFormatOption\n    from transformers import\
+          \ AutoTokenizer\n    from sentence_transformers import SentenceTransformer\n\
+          \    from docling.chunking import HybridChunker\n    from llama_stack_client\
+          \ import LlamaStackClient\n\n    def setup_rapidocr_options() -> RapidOcrOptions:\n\
+          \        rapidocr_dir = os.environ.get(\n            \"RAPIDOCR_MODEL_DIR\"\
+          , \"/opt/app-root/model-cache/rapidocr\"\n        )\n        os.makedirs(rapidocr_dir,\
+          \ exist_ok=True)\n        root = pathlib.Path(rapidocr_dir)\n\n        def\
+          \ first_match(*patterns: str) -> str | None:\n            for pattern in\
+          \ patterns:\n                matches = sorted(root.rglob(pattern))\n   \
+          \             if matches:\n                    return str(matches[0])\n\
+          \            return None\n\n        det = first_match(\"ch_PP-OCRv4_det_mobile.onnx\"\
+          , \"*det*.onnx\")\n        cls = first_match(\"ch_ppocr_mobile_v2.0_cls_infer.onnx\"\
+          , \"*cls*.onnx\")\n        rec = first_match(\"ch_PP-OCRv4_rec_mobile_infer.onnx\"\
+          , \"*rec*.onnx\")\n        keys = first_match(\"*dict*.txt\", \"*keys*.txt\"\
+          )\n\n        kwargs: dict = {}\n        if det:\n            kwargs[\"det_model_path\"\
+          ] = det\n        if cls:\n            kwargs[\"cls_model_path\"] = cls\n\
+          \        if rec:\n            kwargs[\"rec_model_path\"] = rec\n       \
+          \ if keys:\n            kwargs[\"rec_keys_path\"] = keys\n        if not\
+          \ kwargs:\n            kwargs[\"rapidocr_params\"] = {\"Global.model_root_dir\"\
+          : rapidocr_dir}\n        return RapidOcrOptions(**kwargs)\n\n    _log =\
+          \ logging.getLogger(__name__)\n\n    def setup_chunker_and_embedder(embed_model_id:\
+          \ str, max_tokens: int):  \n        \"\"\"Initialize the custom chunker\
+          \ and embedding model\"\"\"  \n        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)\
           \  \n        embedding_model = SentenceTransformer(embed_model_id)  \n \
           \       chunker = HybridChunker(  \n            tokenizer=tokenizer, max_tokens=max_tokens,\
           \ merge_peers=True  \n        )  \n        return embedding_model, chunker\
           \  \n\n    def embed_text(text: str, embedding_model) -> List[float]:  \n\
           \        \"\"\"Generate embedding for text using the custom model\"\"\"\
           \  \n        return embedding_model.encode([text], normalize_embeddings=True).tolist()[0]\
-          \  \n\n    def process_and_insert_with_custom_chunking(  \n        conv_results,\
-          \   \n        vector_store_id: str,   \n        embed_model_id: str,  \n\
-          \        max_tokens: int = 512  \n    ):  \n        \"\"\"Process documents\
-          \ using custom chunker and embedding model\"\"\"  \n        processed_docs\
-          \ = 0  \n\n        # Initialize custom chunker and embedder  \n        embedding_model,\
-          \ chunker = setup_chunker_and_embedder(embed_model_id, max_tokens)  \n\n\
-          \        for conv_res in conv_results:  \n            file_name = conv_res.input.file.stem\
-          \  \n\n            if conv_res.status != ConversionStatus.SUCCESS:  \n \
-          \               _log.warning(f\"Conversion failed for {file_name}: {conv_res.status}\"\
-          )  \n                continue  \n\n            document = conv_res.document\
-          \  \n            if document is None:  \n                _log.warning(f\"\
-          Document conversion returned None for {file_name}\")  \n               \
-          \ continue  \n\n            processed_docs += 1  \n\n            # Create\
-          \ RAGDocuments from custom chunks  \n            rag_documents = []  \n\n\
-          \            for chunk in chunker.chunk(dl_doc=document):  \n          \
-          \      if chunk is None:  \n                    continue  \n\n         \
-          \       raw_chunk = chunker.contextualize(chunk)  \n                if not\
-          \ raw_chunk or not raw_chunk.strip():  \n                    continue  \n\
-          \n                # Generate chunk_id from document + chunk text hash  \n\
-          \                chunk_id = hashlib.sha256(f'{file_name}:{raw_chunk}'.encode()).hexdigest()\
-          \  \n\n                # Create RAGDocument  \n                rag_doc =\
-          \ RAGDocument(  \n                    document_id=chunk_id,  \n        \
-          \            content=raw_chunk,  \n                    metadata={  \n  \
-          \                      \"document_id\": file_name,  \n                 \
-          \       \"file_name\": file_name,  \n                        \"chunk_id\"\
-          : chunk_id,  \n                        \"source\": \"docling_hybrid_chunker\"\
-          \  \n                    }  \n                )  \n                rag_documents.append(rag_doc)\
-          \  \n\n            # Insert using the tool runtime API  \n            if\
-          \ rag_documents:  \n                try:  \n                    client =\
-          \ LlamaStackClient(base_url=service_url)    \n                    client.tool_runtime.rag_tool.insert(\
-          \  \n                        documents=rag_documents,  \n              \
-          \          vector_db_id=vector_store_id,  \n                        chunk_size_in_tokens=max_tokens\
-          \  \n                    )  \n                    _log.info(f\"Inserted\
-          \ {len(rag_documents)} chunks for {file_name}\")  \n                except\
-          \ Exception as e:  \n                    _log.error(f\"Failed to insert\
-          \ chunks for {file_name}: {e}\")  \n\n        _log.info(f\"Processed {processed_docs}\
-          \ documents successfully.\") \n\n    # Main logic starts here\n    input_path\
-          \ = pathlib.Path(input_path)\n    output_path = pathlib.Path(output_path)\n\
+          \  \n\n    def resolve_stack_embedding_model(client, provider_embed_id:\
+          \ str) -> tuple[str, int]:\n        for m in client.models.list():\n   \
+          \         md = m.custom_metadata or {}\n            if md.get(\"model_type\"\
+          ) != \"embedding\":\n                continue\n            if md.get(\"\
+          provider_resource_id\") == provider_embed_id or m.id.endswith(\n       \
+          \         \"/\" + provider_embed_id\n            ):\n                return\
+          \ m.id, int(md.get(\"embedding_dimension\", 768))\n        raise ValueError(f\"\
+          Embedding model '{provider_embed_id}' not found on LlamaStack\")\n\n   \
+          \ def process_and_insert_with_custom_chunking(\n        conv_results,\n\
+          \        vector_store_id: str,\n        embed_model_id: str,\n        max_tokens:\
+          \ int = 512,\n        batch_size: int = 32,\n    ):\n        \"\"\"Process\
+          \ documents using custom chunker and precomputed embeddings.\"\"\"\n   \
+          \     processed_docs = 0\n        client = LlamaStackClient(base_url=service_url)\n\
+          \        stack_model_id, embedding_dim = resolve_stack_embedding_model(client,\
+          \ embed_model_id)\n        embedding_model, chunker = setup_chunker_and_embedder(embed_model_id,\
+          \ max_tokens)\n\n        for conv_res in conv_results:\n            file_name\
+          \ = conv_res.input.file.stem\n\n            if conv_res.status != ConversionStatus.SUCCESS:\n\
+          \                _log.warning(f\"Conversion failed for {file_name}: {conv_res.status}\"\
+          )\n                continue\n\n            document = conv_res.document\n\
+          \            if document is None:\n                _log.warning(f\"Document\
+          \ conversion returned None for {file_name}\")\n                continue\n\
+          \n            processed_docs += 1\n            chunks = []\n\n         \
+          \   for chunk in chunker.chunk(dl_doc=document):\n                if chunk\
+          \ is None:\n                    continue\n\n                raw_chunk =\
+          \ chunker.contextualize(chunk)\n                if not raw_chunk or not\
+          \ raw_chunk.strip():\n                    continue\n\n                chunk_id\
+          \ = hashlib.sha256(f\"{file_name}:{raw_chunk}\".encode()).hexdigest()\n\
+          \                chunks.append(\n                    {\n               \
+          \         \"chunk_id\": chunk_id,\n                        \"content\":\
+          \ raw_chunk,\n                        \"chunk_metadata\": {\n          \
+          \                  \"document_id\": file_name,\n                       \
+          \     \"file_name\": file_name,\n                            \"chunk_id\"\
+          : chunk_id,\n                            \"source\": \"docling_hybrid_chunker\"\
+          ,\n                        },\n                        \"embedding\": embed_text(raw_chunk,\
+          \ embedding_model),\n                        \"embedding_model\": stack_model_id,\n\
+          \                        \"embedding_dimension\": embedding_dim,\n     \
+          \               }\n                )\n\n            if not chunks:\n   \
+          \             continue\n\n            try:\n                for i in range(0,\
+          \ len(chunks), batch_size):\n                    client.vector_io.insert(\n\
+          \                        vector_store_id=vector_store_id,\n            \
+          \            chunks=chunks[i : i + batch_size],\n                    )\n\
+          \                _log.info(f\"Inserted {len(chunks)} chunks for {file_name}\"\
+          )\n            except Exception as e:\n                _log.error(f\"Failed\
+          \ to insert chunks for {file_name}: {e}\")\n\n        _log.info(f\"Processed\
+          \ {processed_docs} documents successfully.\")\n\n    # Main logic starts\
+          \ here\n    input_path = pathlib.Path(input_path)\n    output_path = pathlib.Path(output_path)\n\
           \    output_path.mkdir(parents=True, exist_ok=True)\n\n    # Build absolute\
           \ paths for the PDFs\n    input_pdfs = list(input_path.rglob(\"*.pdf\"))\n\
           \n    # Ensure only valid, non-empty PDFs are kept\n    input_pdfs = [p\
@@ -564,8 +620,8 @@ deploymentSpec:
           \ when they are\n    # not provided in PdfPipelineOptions initialization\n\
           \    pipeline_options = PdfPipelineOptions()\n    pipeline_options.do_ocr\
           \ = True\n    pipeline_options.generate_page_images = True\n    pipeline_options.ocr_options\
-          \ = RapidOcrOptions()\n\n    doc_converter = DocumentConverter(\n      \
-          \  format_options={\n            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)\n\
+          \ = setup_rapidocr_options()\n\n    doc_converter = DocumentConverter(\n\
+          \        format_options={\n            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)\n\
           \        }\n    )\n\n    print(\"PDFs for conversion:\")\n    for p in input_pdfs:\n\
           \        print(f\" - {p} (exists={p.exists()}, size={p.stat().st_size if\
           \ p.exists() else 'N/A'})\")\n\n    conv_results = doc_converter.convert_all(\n\
@@ -574,7 +630,7 @@ deploymentSpec:
           \    process_and_insert_with_custom_chunking( conv_results=conv_results,\
           \  \n        vector_store_id=vector_store_id,  \n        embed_model_id=embed_model_id,\
           \  \n        max_tokens=512)\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.2
+        image: quay.io/balki404/docling-pipeline:0.0.6
         resources:
           cpuLimit: 4.0
           cpuRequest: 0.5
@@ -596,8 +652,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'requests'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.14.6'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -624,7 +679,7 @@ deploymentSpec:
           \ {filename}\")\n        except requests.exceptions.RequestException as\
           \ e:\n            print(f\"Failed to download {filename}: {e}, skipping.\"\
           )\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.2
+        image: quay.io/balki404/docling-pipeline:0.0.6
     exec-register-vector-db:
       container:
         args:
@@ -637,10 +692,9 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'llama-stack-client==0.3.1'\
-          \ 'fire' 'requests'  &&  python3 -m pip install --quiet --no-warn-script-location\
-          \ 'kfp==2.14.6' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
-          3.9\"' && \"$0\" \"$@\"\n"
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -655,21 +709,24 @@ deploymentSpec:
           \ *\n\ndef register_vector_db(\n    service_url: str,\n    vector_db_id:\
           \ str,\n    embed_model_id: str,\n) -> str:\n    from llama_stack_client\
           \ import LlamaStackClient\n\n    client = LlamaStackClient(base_url=service_url)\n\
-          \n    models = client.models.list()\n    matching_model = next(\n      \
-          \  (m for m in models if m.provider_resource_id == embed_model_id), None\n\
-          \    )\n\n    if not matching_model:\n        raise ValueError(\n      \
-          \      f\"Model with ID '{embed_model_id}' not found on LlamaStack server.\"\
-          \n        )\n\n    if matching_model.model_type != \"embedding\":\n    \
-          \    raise ValueError(f\"Model '{embed_model_id}' is not an embedding model\"\
-          )\n\n    embedding_dimension = matching_model.metadata[\"embedding_dimension\"\
-          ]\n\n    vector_store = client.vector_stores.create(\n        name=vector_db_id,\n\
-          \        extra_body={\n            \"provider_id\": \"milvus-remote\",\n      \
-          \      \"embedding_model\": matching_model.identifier,\n            \"embedding_dimension\"\
-          : embedding_dimension,\n        }\n    )\n    print(\n        f\"Created\
-          \ vector store '{vector_db_id}' with embedding model '{embed_model_id}'\
-          \ with the vector store ID '{vector_store.id}'.\"\n    )\n\n    return vector_store.id\n\
-          \n"
-        image: quay.io/balki404/docling-pipeline:0.0.2
+          \n    available = []\n    stack_model_id = None\n    embedding_dimension\
+          \ = 768\n    for m in client.models.list():\n        md = m.custom_metadata\
+          \ or {}\n        if md.get(\"model_type\") != \"embedding\":\n         \
+          \   continue\n        provider_id = md.get(\"provider_resource_id\", \"\"\
+          )\n        available.append(provider_id)\n        if provider_id == embed_model_id\
+          \ or m.id.endswith(\"/\" + embed_model_id):\n            stack_model_id\
+          \ = m.id\n            embedding_dimension = int(md.get(\"embedding_dimension\"\
+          , 768))\n            break\n    if not stack_model_id:\n        raise ValueError(\n\
+          \            f\"Model with ID '{embed_model_id}' not found on LlamaStack\
+          \ server. \"\n            f\"Available embedding models: {available}\"\n\
+          \        )\n\n    vector_store = client.vector_stores.create(\n        name=vector_db_id,\n\
+          \        extra_body={\n            \"provider_id\": \"milvus-remote\",\n\
+          \            \"embedding_model\": stack_model_id,\n            \"embedding_dimension\"\
+          : embedding_dimension,\n        },\n    )\n    print(\n        f\"Created\
+          \ vector store '{vector_db_id}' with embedding model '{stack_model_id}'\
+          \ \"\n        f\"(vector store ID '{vector_store.id}').\"\n    )\n\n   \
+          \ return vector_store.id\n\n"
+        image: quay.io/balki404/docling-pipeline:0.0.6
 pipelineInfo:
   description: Converts PDF documents in a git repository to Markdown using Docling
     and generates embeddings
@@ -801,7 +858,7 @@ root:
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.14.6
+sdkVersion: kfp-2.16.1
 ---
 platforms:
   kubernetes:

@@ -1,22 +1,53 @@
 FROM registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168
 
+ARG EMBED_MODEL_ID=ibm-granite/granite-embedding-125m-english
+
 USER root
 
-# Install system libraries needed by OpenCV / RapidOCR
-RUN yum install -y mesa-libGL  # RHEL / UBI
+# install system libraries needed by OpenCV / RapidOCR
+RUN yum install -y mesa-libGL
+
+# writable model cache for runtime user 1001
+RUN mkdir -p /opt/app-root/model-cache/huggingface /opt/app-root/model-cache/sentence-transformers /opt/app-root/model-cache/rapidocr \
+    && chown -R 1001:0 /opt/app-root/model-cache
 
 USER 1001
 
-# Install Python packages at image build time
-RUN pip install --upgrade pip
-RUN pip install \
+ENV HF_HOME=/opt/app-root/model-cache/huggingface
+ENV TRANSFORMERS_CACHE=/opt/app-root/model-cache/huggingface
+ENV HUGGINGFACE_HUB_CACHE=/opt/app-root/model-cache/huggingface
+ENV SENTENCE_TRANSFORMERS_HOME=/opt/app-root/model-cache/sentence-transformers
+ENV RAPIDOCR_MODEL_DIR=/opt/app-root/model-cache/rapidocr
+
+# install python packages at image build time
+RUN pip install --upgrade pip && pip install \
     docling>=2.43.0 \
     transformers \
     sentence-transformers \
-    llama-stack==0.3.1 \
-    llama-stack-client==0.3.1 \
+    llama-stack-client==0.4.2 \
     pymilvus \
     fire \
+    requests \
     rapidocr-onnxruntime \
     rapidocr \
     onnxruntime
+
+# pre-download embedding model so pipeline pods do not hit HF at runtime
+RUN python -c "\
+from transformers import AutoTokenizer; \
+from sentence_transformers import SentenceTransformer; \
+m='${EMBED_MODEL_ID}'; \
+AutoTokenizer.from_pretrained(m); \
+SentenceTransformer(m); \
+print('cached', m)"
+
+# pre-download rapidocr onnx models into writable cache (not site-packages)
+RUN python -c "\
+from pathlib import Path; \
+import numpy as np; \
+from rapidocr import RapidOCR; \
+root='/opt/app-root/model-cache/rapidocr'; \
+Path(root).mkdir(parents=True, exist_ok=True); \
+ocr=RapidOCR(params={'Global.model_root_dir': root}); \
+ocr(np.zeros((64, 256, 3), dtype=np.uint8)); \
+print('rapidocr cached', [str(p) for p in Path(root).rglob('*.onnx')])"
