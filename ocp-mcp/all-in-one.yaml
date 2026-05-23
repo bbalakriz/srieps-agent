@@ -89,6 +89,8 @@ kind: Route
 apiVersion: route.openshift.io/v1
 metadata:
   name: ocp-mcp
+  annotations:
+    haproxy.router.openshift.io/timeout: 3600s
 spec:
   path: /
   to:
