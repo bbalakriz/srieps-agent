@@ -13,9 +13,9 @@
 #        oc apply -f kcs-stage-deployment.yaml
 #        
 #        # Wait for the kcs-stage pod to be Running, then:
-#        POD_NAME=$(oc -n llamastack get pods -l app:kcs-stage -o jsonpath='{.items[0].metadata.name}')
+#        POD_NAME=$(oc -n llamastack get pods -l app=kcs-stage -o jsonpath='{.items[0].metadata.name}')
 #        oc -n llamastack cp kcs-exporter/<directory>/<file>.ndjson $POD_NAME:/data/kcs-articles.ndjson
-#        oc -n llamastack delete deployment kcs-stage
+#        oc -n llamastack scale deployment kcs-stage --replicas=0
 #
 #   3. Trigger an ingest run on demand:
 #        oc -n llamastack create -f kcs-ingest-job.yaml
@@ -48,7 +48,7 @@ spec:
             claimName: kcs-data
       containers:
         - name: kcs-ingest
-          image: quay.io/balki404/sreips-kcs-exporter:0.0.1
+          image: quay.io/balki404/sreips-hermes-kcs-exporter:0.0.1
           imagePullPolicy: Always
           resources:
             requests:

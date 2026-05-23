@@ -69,6 +69,23 @@ def format_article(record: dict) -> str:
     return "\n".join(parts)
 
 
+def resolve_embedding_model(client: LlamaStackClient, embed_model_id: str) -> tuple[str, int]:
+    """Map provider resource id (e.g. ibm-granite/...) to stack model id and dimension."""
+    available = []
+    for m in client.models.list():
+        md = m.custom_metadata or {}
+        if md.get("model_type") != "embedding":
+            continue
+        provider_id = md.get("provider_resource_id", "")
+        available.append(provider_id)
+        if provider_id == embed_model_id or m.id.endswith("/" + embed_model_id):
+            return m.id, int(md.get("embedding_dimension", 768))
+    raise SystemExit(
+        f"Embedding model '{embed_model_id}' not found in LlamaStack.\n"
+        f"Available embedding models: {available}"
+    )
+
+
 def ensure_vector_store(client: LlamaStackClient, name: str, embed_model_id: str) -> str:
     """
     Return the UUID for the named vector store, creating it only if needed.
@@ -80,26 +97,17 @@ def ensure_vector_store(client: LlamaStackClient, name: str, embed_model_id: str
         print(f"Using existing vector store '{existing.id}' (name='{name}')")
         return existing.id
 
-    models = client.models.list()
-    embed_model = next(
-        (m for m in models if m.provider_resource_id == embed_model_id), None
-    )
-    if not embed_model:
-        available = [m.provider_resource_id for m in models]
-        raise SystemExit(
-            f"Embedding model '{embed_model_id}' not found in LlamaStack.\n"
-            f"Available models: {available}"
-        )
+    stack_model_id, embedding_dimension = resolve_embedding_model(client, embed_model_id)
 
     store = client.vector_stores.create(
         name=name,
         extra_body={
             "provider_id": "milvus-remote",
-            "embedding_model": embed_model.identifier,
-            "embedding_dimension": embed_model.metadata["embedding_dimension"],
+            "embedding_model": stack_model_id,
+            "embedding_dimension": embedding_dimension,
         },
     )
-    print(f"Created vector store '{store.id}' with model '{embed_model.identifier}'")
+    print(f"Created vector store '{store.id}' with model '{stack_model_id}'")
     return store.id
 
 
