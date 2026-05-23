@@ -1,3 +1,5 @@
+# deploy via bootstrap.sh -- do NOT run oc apply directly on this file.
+# it contains REPLACE_* placeholders that must be substituted first.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -66,8 +68,6 @@ data:
       threshold: 0.50
       target_ratio: 0.20
       protect_last_n: 20
-    external_dirs:
-      - /etc/hermes/skills/sreips
     mcp_servers:
       ocp_mcp:
         url: "REPLACE_OCP_MCP_SSE"
@@ -184,8 +184,6 @@ spec:
         - mountPath: /opt/data/config.yaml
           name: hermes-config
           subPath: config.yaml
-        - mountPath: /etc/hermes/skills/sreips
-          name: sreips-skills
       initContainers:
       - name: install-sreips-skills
         image: registry.access.redhat.com/ubi9/ubi-minimal:latest
@@ -194,20 +192,20 @@ spec:
         - sh
         - -ec
         - |
-          mkdir -p /skills
           for f in /src/*; do
             [ -f "$f" ] || continue
             skill=$(basename "$f")
-            mkdir -p "/skills/${skill}"
-            cp "$f" "/skills/${skill}/SKILL.md"
+            mkdir -p "/opt/data/skills/${skill}"
+            cp "$f" "/opt/data/skills/${skill}/SKILL.md"
+            echo "installed skill: ${skill}"
           done
         securityContext:
           runAsNonRoot: true
           runAsUser: 10000
           allowPrivilegeEscalation: false
         volumeMounts:
-        - name: sreips-skills
-          mountPath: /skills
+        - name: hermes-data
+          mountPath: /opt/data
         - name: sreips-skills-src
           mountPath: /src
       dnsPolicy: ClusterFirst
@@ -228,8 +226,6 @@ spec:
           defaultMode: 420
           name: hermes-config
         name: hermes-config
-      - name: sreips-skills
-        emptyDir: {}
       - name: sreips-skills-src
         configMap:
           name: hermes-sreips-skills
