@@ -6,7 +6,7 @@ from kfp.kubernetes import add_node_selector_json, add_toleration_json
 
 # PYTHON_BASE_IMAGE = "registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168"
 # bake deps in Containerfile; avoid packages_to_install (pip as uid 1001 fails on site-packages)
-PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.0.6"
+PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.0.7"
 PYTORCH_CUDA_IMAGE = "quay.io/modh/odh-pipeline-runtime-pytorch-cuda-py311-ubi9@sha256:4706be608af3f33c88700ef6ef6a99e716fc95fc7d2e879502e81c0022fd840e"
 
 _log = logging.getLogger(__name__)
@@ -131,20 +131,17 @@ def docling_convert(
     import logging
     from typing import List
 
-    # openshift runs as uid 1001; default HF cache under $HOME is not writable
-    hf_cache = os.environ.get(
-        "HF_HOME", "/opt/app-root/model-cache/huggingface"
-    )
-    st_cache = os.environ.get(
-        "SENTENCE_TRANSFORMERS_HOME",
-        "/opt/app-root/model-cache/sentence-transformers",
-    )
-    for path in (hf_cache, st_cache):
-        os.makedirs(path, exist_ok=True)
+    # baked in image; offline + artifacts_path avoids HF writes at runtime
+    hf_cache = "/opt/app-root/model-cache/huggingface"
+    st_cache = "/opt/app-root/model-cache/sentence-transformers"
+    docling_artifacts = "/opt/app-root/model-cache/docling"
     os.environ["HF_HOME"] = hf_cache
     os.environ["TRANSFORMERS_CACHE"] = hf_cache
     os.environ["HUGGINGFACE_HUB_CACHE"] = hf_cache
     os.environ["SENTENCE_TRANSFORMERS_HOME"] = st_cache
+    os.environ["DOCLING_ARTIFACTS_PATH"] = docling_artifacts
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
     from docling.datamodel.base_models import InputFormat, ConversionStatus
     from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
@@ -190,7 +187,9 @@ def docling_convert(
     
     def setup_chunker_and_embedder(embed_model_id: str, max_tokens: int):  
         """Initialize the custom chunker and embedding model"""  
-        tokenizer = AutoTokenizer.from_pretrained(embed_model_id)  
+        tokenizer = AutoTokenizer.from_pretrained(
+            embed_model_id, local_files_only=True
+        )
         embedding_model = SentenceTransformer(embed_model_id)  
         chunker = HybridChunker(  
             tokenizer=tokenizer, max_tokens=max_tokens, merge_peers=True  
@@ -294,9 +293,7 @@ def docling_convert(
     if not input_pdfs:
         raise RuntimeError("No valid PDFs found in input_path for processing.")
 
-    # Required models are automatically downloaded when they are
-    # not provided in PdfPipelineOptions initialization
-    pipeline_options = PdfPipelineOptions()
+    pipeline_options = PdfPipelineOptions(artifacts_path=docling_artifacts)
     pipeline_options.do_ocr = True
     pipeline_options.generate_page_images = True
     pipeline_options.ocr_options = setup_rapidocr_options()

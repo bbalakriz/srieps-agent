@@ -7,9 +7,13 @@ USER root
 # install system libraries needed by OpenCV / RapidOCR
 RUN yum install -y mesa-libGL
 
-# writable model cache for runtime user 1001
-RUN mkdir -p /opt/app-root/model-cache/huggingface /opt/app-root/model-cache/sentence-transformers /opt/app-root/model-cache/rapidocr \
-    && chown -R 1001:0 /opt/app-root/model-cache
+# model dirs; group 0 + g+rwX so openshift arbitrary uid can read/write
+RUN mkdir -p /opt/app-root/model-cache/docling \
+    /opt/app-root/model-cache/huggingface \
+    /opt/app-root/model-cache/sentence-transformers \
+    /opt/app-root/model-cache/rapidocr \
+    && chown -R 1001:0 /opt/app-root/model-cache \
+    && chmod -R g+rwX /opt/app-root/model-cache
 
 USER 1001
 
@@ -18,10 +22,11 @@ ENV TRANSFORMERS_CACHE=/opt/app-root/model-cache/huggingface
 ENV HUGGINGFACE_HUB_CACHE=/opt/app-root/model-cache/huggingface
 ENV SENTENCE_TRANSFORMERS_HOME=/opt/app-root/model-cache/sentence-transformers
 ENV RAPIDOCR_MODEL_DIR=/opt/app-root/model-cache/rapidocr
+ENV DOCLING_ARTIFACTS_PATH=/opt/app-root/model-cache/docling
 
 # install python packages at image build time
 RUN pip install --upgrade pip && pip install \
-    docling>=2.43.0 \
+    docling==2.43.0 \
     transformers \
     sentence-transformers \
     llama-stack-client==0.4.2 \
@@ -31,6 +36,9 @@ RUN pip install --upgrade pip && pip install \
     rapidocr-onnxruntime \
     rapidocr \
     onnxruntime
+
+# layout, tableformer, and other docling pipeline weights (not HF cache layout)
+RUN docling-tools models download --output /opt/app-root/model-cache/docling
 
 # pre-download embedding model so pipeline pods do not hit HF at runtime
 RUN python -c "\
@@ -51,3 +59,10 @@ Path(root).mkdir(parents=True, exist_ok=True); \
 ocr=RapidOCR(params={'Global.model_root_dir': root}); \
 ocr(np.zeros((64, 256, 3), dtype=np.uint8)); \
 print('rapidocr cached', [str(p) for p in Path(root).rglob('*.onnx')])"
+
+USER root
+RUN chmod -R g+rwX /opt/app-root/model-cache
+USER 1001
+
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
