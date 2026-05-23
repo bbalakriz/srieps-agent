@@ -498,7 +498,7 @@ spec:
       automountServiceAccountToken: true
       containers:
       - name: runner
-        image: quay.io/balki404/sreips-runner:rhoai-3
+        image: quay.io/balki404/sreips-hermes-runner:0.0.4
         imagePullPolicy: IfNotPresent
         securityContext:
             allowPrivilegeEscalation: false
@@ -532,6 +532,10 @@ spec:
             value: cluster.local
           - name: SET_KRR_SECURITY_CONTEXT
             value: "false"
+          - name: HERMES_RCA_URL
+            value: "http://hermes-rca-bridge.hermes-agent.svc.cluster.local:8000"
+          - name: USE_HERMES_RCA
+            value: "true"
         envFrom:
         - secretRef:
             name: sreips-runner-secret
