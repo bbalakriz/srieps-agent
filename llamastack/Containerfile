@@ -4,8 +4,10 @@ ARG EMBED_MODEL_ID=ibm-granite/granite-embedding-125m-english
 
 USER root
 
-# install system libraries needed by OpenCV / RapidOCR
-RUN yum install -y mesa-libGL
+# 1. Clean yum cache immediately to prevent layer bloat
+RUN yum install -y mesa-libGL \
+    && yum clean all \
+    && rm -rf /var/cache/yum
 
 # model dirs; group 0 + g+rwX so openshift arbitrary uid can read/write
 RUN mkdir -p /opt/app-root/model-cache/docling \
@@ -24,8 +26,11 @@ ENV SENTENCE_TRANSFORMERS_HOME=/opt/app-root/model-cache/sentence-transformers
 ENV RAPIDOCR_MODEL_DIR=/opt/app-root/model-cache/rapidocr
 ENV DOCLING_ARTIFACTS_PATH=/opt/app-root/model-cache/docling
 
-# install python packages at image build time
-RUN pip install --upgrade pip && pip install \
+# 2. Use --no-cache-dir to stop pip from saving downloaded .whl files
+# 3. Force CPU-only PyTorch via --extra-index-url (Saves ~2.5GB+)
+RUN pip install --upgrade pip --no-cache-dir && \
+    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision \
     docling==2.43.0 \
     transformers \
     sentence-transformers \
@@ -37,20 +42,16 @@ RUN pip install --upgrade pip && pip install \
     rapidocr \
     onnxruntime
 
-# layout, tableformer, and other docling pipeline weights (not HF cache layout)
-RUN docling-tools models download --output /opt/app-root/model-cache/docling
-
-# pre-download embedding model so pipeline pods do not hit HF at runtime
-RUN python -c "\
+# 4. Combine model downloads into a single RUN layer to reduce intermediate container overhead
+RUN docling-tools models download --output-dir /opt/app-root/model-cache/docling && \
+    python -c "\
 from transformers import AutoTokenizer; \
 from sentence_transformers import SentenceTransformer; \
 m='${EMBED_MODEL_ID}'; \
 AutoTokenizer.from_pretrained(m); \
 SentenceTransformer(m); \
-print('cached', m)"
-
-# pre-download rapidocr onnx models into writable cache (not site-packages)
-RUN python -c "\
+print('cached', m)" && \
+    python -c "\
 from pathlib import Path; \
 import numpy as np; \
 from rapidocr import RapidOCR; \
@@ -61,7 +62,11 @@ ocr(np.zeros((64, 256, 3), dtype=np.uint8)); \
 print('rapidocr cached', [str(p) for p in Path(root).rglob('*.onnx')])"
 
 USER root
-RUN chmod -R g+rwX /opt/app-root/model-cache
+
+# 5. Clear out /tmp and user cache to catch any lingering extraction blobs
+RUN chmod -R g+rwX /opt/app-root/model-cache \
+    && rm -rf /tmp/* /var/tmp/* ~/.cache
+
 USER 1001
 
 ENV HF_HUB_OFFLINE=1
