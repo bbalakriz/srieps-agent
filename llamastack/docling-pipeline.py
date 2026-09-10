@@ -6,7 +6,7 @@ from kfp.kubernetes import add_node_selector_json, add_toleration_json
 
 # PYTHON_BASE_IMAGE = "registry.redhat.io/ubi9/python-312@sha256:e80ff3673c95b91f0dafdbe97afb261eab8244d7fd8b47e20ffcbcfee27fb168"
 # bake deps in Containerfile; avoid packages_to_install (pip as uid 1001 fails on site-packages)
-PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.0.7"
+PYTHON_BASE_IMAGE = "quay.io/balki404/docling-pipeline:0.7.2"
 PYTORCH_CUDA_IMAGE = "quay.io/modh/odh-pipeline-runtime-pytorch-cuda-py311-ubi9@sha256:4706be608af3f33c88700ef6ef6a99e716fc95fc7d2e879502e81c0022fd840e"
 
 _log = logging.getLogger(__name__)

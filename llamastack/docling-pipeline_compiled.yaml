@@ -344,7 +344,7 @@ deploymentSpec:
           \ == \".pdf\"\n    ]\n\n    print(f\"Found PDFs for processing:\" , all_pdfs)\n\
           \n    splits = [\n        batch for batch in (all_pdfs[i::num_splits] for\
           \ i in range(num_splits)) if batch\n    ]\n    return splits or [[]]\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.7
+        image: quay.io/balki404/docling-pipeline:0.7.2
     exec-docling-convert:
       container:
         args:
@@ -480,7 +480,7 @@ deploymentSpec:
           \    process_and_insert_with_custom_chunking( conv_results=conv_results,\
           \  \n        vector_store_id=vector_store_id,  \n        embed_model_id=embed_model_id,\
           \  \n        max_tokens=512)\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.7
+        image: quay.io/balki404/docling-pipeline:0.7.2
         resources:
           accelerator:
             count: '1'
@@ -630,7 +630,7 @@ deploymentSpec:
           \    process_and_insert_with_custom_chunking( conv_results=conv_results,\
           \  \n        vector_store_id=vector_store_id,  \n        embed_model_id=embed_model_id,\
           \  \n        max_tokens=512)\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.7
+        image: quay.io/balki404/docling-pipeline:0.7.2
         resources:
           cpuLimit: 4.0
           cpuRequest: 0.5
@@ -679,7 +679,7 @@ deploymentSpec:
           \ {filename}\")\n        except requests.exceptions.RequestException as\
           \ e:\n            print(f\"Failed to download {filename}: {e}, skipping.\"\
           )\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.7
+        image: quay.io/balki404/docling-pipeline:0.7.2
     exec-register-vector-db:
       container:
         args:
@@ -726,7 +726,7 @@ deploymentSpec:
           \ vector store '{vector_db_id}' with embedding model '{stack_model_id}'\
           \ \"\n        f\"(vector store ID '{vector_store.id}').\"\n    )\n\n   \
           \ return vector_store.id\n\n"
-        image: quay.io/balki404/docling-pipeline:0.0.7
+        image: quay.io/balki404/docling-pipeline:0.7.2
 pipelineInfo:
   description: Converts PDF documents in a git repository to Markdown using Docling
     and generates embeddings
