@@ -34,7 +34,7 @@ RUN pip install --upgrade pip --no-cache-dir && \
     docling==2.43.0 \
     transformers \
     sentence-transformers \
-    llama-stack-client==0.4.2 \
+    llama-stack-client==0.7.2 \
     pymilvus \
     fire \
     requests \
