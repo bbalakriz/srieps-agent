@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: sreips-rag-mcp
-          image: quay.io/balki404/sreips-hermes-rag-mcp:0.0.2
+          image: quay.io/balki404/sreips-hermes-rag-mcp:0.0.3
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
