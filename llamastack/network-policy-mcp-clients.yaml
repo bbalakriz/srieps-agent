@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lsd-llama-milvus-allow-mcp-clients
+  namespace: llamastack
+  labels:
+    app.kubernetes.io/part-of: llama-stack
+spec:
+  # the llama-stack-operator generates lsd-llama-milvus-network-policy which
+  # only allows ingress on 8321 from pods in the llamastack namespace itself
+  # and from redhat-ods-applications. that blocks the sreips-rag-mcp pod
+  # (hermes-agent ns), the rh-kcs-mcp pod (mcp-servers ns) and even the
+  # openshift router proxying the external route, so every /v1/vector_stores
+  # call from those namespaces times out and the router falls back to its
+  # "application is not available" page. this policy is additive (network
+  # policies selecting the same pods are ORed together) and keeps the
+  # operator managed policy untouched so it survives reconciliation.
+  podSelector:
+    matchLabels:
+      app: llama-stack
+      app.kubernetes.io/instance: lsd-llama-milvus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hermes-agent
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp-servers
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-ingress
+      ports:
+        - port: 8321
+          protocol: TCP

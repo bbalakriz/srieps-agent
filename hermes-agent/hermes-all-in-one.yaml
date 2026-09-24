@@ -58,6 +58,45 @@ data:
     fallback_model:
       provider: "openrouter"
       model: "google/gemma-4-31b-it:free"
+    # litemaas serves this model behind a reasoning capable vllm backend that
+    # can take well over a minute just on the thinking phase before the first
+    # content token, and hermes's own default stream stale detector (60-90s)
+    # kills the connection before that arrives, which surfaces as a generic
+    # "Connection error" retried into the (currently broken) fallback. raise
+    # the floor so slow but alive responses aren't cut off mid think.
+    providers:
+      custom:
+        request_timeout_seconds: 900
+        stale_timeout_seconds: 900
+        models:
+          REPLACE_HERMES_MODEL:
+            request_timeout_seconds: 900
+            stale_timeout_seconds: 900
+    agent:
+      # "qwen" already matches hermes's default tool_use_enforcement "auto" list,
+      # pinned to true so RCA still gets tool backed evidence if the model is ever
+      # swapped to a family outside that default list.
+      tool_use_enforcement: true
+    # deterministic, code level replacement for prompt only anti repetition rules.
+    # warnings_enabled surfaces loops without stopping the run; hard_stop_enabled
+    # is left off for the initial rollout so a customer can observe real traffic
+    # before anything can abort an investigation (see HERMES_RCA.md rollout notes).
+    tool_loop_guardrails:
+      warnings_enabled: true
+      hard_stop_enabled: false
+      warn_after:
+        exact_failure: 2
+        same_tool_failure: 3
+        idempotent_no_progress: 2
+      hard_stop_after:
+        exact_failure: 5
+        same_tool_failure: 8
+        idempotent_no_progress: 5
+    display:
+      # required for hermes-rca-bridge to receive hermes.tool.progress SSE events
+      # on streaming /v1/chat/completions calls (bridge.py uses these as an
+      # independently observed tool call trace, see item 4a in the RCA roadmap).
+      tool_progress: all
     terminal:
       backend: "local"
       cwd: "/opt/data/workspace"
@@ -146,7 +185,7 @@ spec:
           value: 0.0.0.0
         - name: API_SERVER_PORT
           value: "8642"
-        image: nousresearch/hermes-agent:sha-bec2250d2c8349fc85201bcd1aa39bcaa766a555
+        image: nousresearch/hermes-agent:v2026.7.20
         imagePullPolicy: Always
         livenessProbe:
           failureThreshold: 3
@@ -281,7 +320,6 @@ spec:
   resources:
     requests:
       storage: 2Gi
-  storageClassName: gp3-csi
 ---
 # bootstrap substitutes REPLACE_* from config.env and captured MCP routes, then oc apply
 # SCC anyuid for hermes SA: bootstrap runs oc adm policy after apply

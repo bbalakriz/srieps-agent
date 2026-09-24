@@ -682,12 +682,12 @@ install_llamastack() {
     log_info "Applying rhoai-operator.3.4.0 operator setup..."
     oc apply -f operators-setup.yaml
 
-    log_info "Waiting for operator to be installed (60 seconds)..."
-    sleep 60 
+    log_info "Waiting for operator to be installed (120 seconds)..."
+    sleep 120 
 
     log_info "Approving rhoai-operator.3.4.0 operator install plan..."
     INSTALL_PLAN=$(oc get installplan -n redhat-ods-operator \
-            -o jsonpath='{.items[?(@.spec.clusterServiceVersionNames[0]=="rhods-operator.3.4.0")].metadata.name}')
+            -o jsonpath='{.items[?(@.spec.clusterServiceVersionNames[0]=="rhods-operator.3.4.2")].metadata.name}')
 
     oc patch installplan $INSTALL_PLAN \
         -n redhat-ods-operator \
@@ -695,13 +695,13 @@ install_llamastack() {
         --patch '{"spec":{"approved":true}}'
     
     log_info "Waiting for all relevant rhoai components to be installed (120 seconds)..."
-    sleep 30
+    sleep 120
 
     log_info "Applying data science cluster setup..."
     oc apply -f dsc-setup.yaml
 
     log_info "Waiting for all dsc pods to be installed (180 seconds)..."
-    sleep 30
+    sleep 180
     
     log_info "Creating llamastack namespace..."
     oc new-project llamastack || oc project llamastack
@@ -735,12 +735,22 @@ install_llamastack() {
     oc label secret dashboard-dspa-secret opendatahub.io/dashboard=true -n llamastack --overwrite
     
     log_info "Waiting for Data Science Pipeline server to be ready (this may take up to 6 minutes)..."
-    sleep 30
+    sleep 120
     
     log_info "Capturing LlamaStack route..."
     LLAMA_ROUTE=$(oc get route lsd-llama-milvus-service -n llamastack -o jsonpath='{.spec.host}')
     export LLAMA_STACK_URL="https://${LLAMA_ROUTE}/"
-    log_success "LlamaStack URL: $LLAMA_STACK_URL"
+    # pods calling llamastack from other namespaces (sreips-rag-mcp, rh-kcs-mcp) must use
+    # the in cluster service dns, not the external route. the openshift router runs with
+    # hostNetwork so its hairpin traffic back into the llamastack namespace hits the same
+    # NetworkPolicy the operator generates for the llama-stack pod, and that policy only
+    # allows ingress from pods already inside the llamastack namespace, so cross namespace
+    # calls through the route time out even though the route itself resolves fine.
+    export LLAMA_STACK_INTERNAL_URL="http://lsd-llama-milvus-service.llamastack.svc.cluster.local:8321"
+    log_success "LlamaStack URL: $LLAMA_STACK_URL (internal: $LLAMA_STACK_INTERNAL_URL)"
+
+    log_info "Allowing hermes-agent and mcp-servers pods to reach llamastack on 8321..."
+    oc apply -f "${SCRIPT_DIR}/llamastack/network-policy-mcp-clients.yaml"
     
     log_info "Getting Data Science Pipeline route and token..."
     DS_PIPELINE_ROUTE=$(oc get route -n llamastack ds-pipeline-dspa -o jsonpath='{.spec.host}')
@@ -823,7 +833,7 @@ patch_rh_kcs_mcp_with_llamastack_url() {
     
     log_info "Updating rh-kcs-mcp deployment with LLAMA_STACK_URL and KCS_MODE..."
     oc set env deployment/redhat-api-mcp \
-        LLAMA_STACK_URL="$LLAMA_STACK_URL" \
+        LLAMA_STACK_URL="$LLAMA_STACK_INTERNAL_URL" \
         KCS_MODE="${KCS_MODE:-offline}" \
         -n mcp-servers
     
@@ -856,7 +866,7 @@ install_sreips_rag_mcp() {
 
     log_info "Creating sreips-rag-mcp-config..."
     oc create configmap sreips-rag-mcp-config \
-        --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_URL" \
+        --from-literal=LLAMA_STACK_URL="$LLAMA_STACK_INTERNAL_URL" \
         --from-literal=VECTOR_DB_ID="${VECTOR_DB_ID:-sreips_vector_id}" \
         -n hermes-agent \
         --dry-run=client -o yaml | oc apply -f -

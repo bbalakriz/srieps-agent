@@ -9,7 +9,6 @@ data:
     version: 2
     image_name: rh
     apis:
-    - agents
     - batches
     - datasetio
     - eval
@@ -58,19 +57,6 @@ data:
           orchestrator_url: ${env.FMS_ORCHESTRATOR_URL:=}
           ssl_cert_path: ${env.FMS_SSL_CERT_PATH:=}
           shields: {}
-      agents:
-      - provider_id: meta-reference
-        provider_type: inline::meta-reference
-        config:
-          persistence:
-            agent_state:
-              backend: kv_default
-              namespace: agents::meta_reference
-            responses:
-              backend: sql_default
-              table_name: agents_responses
-              max_write_queue_size: 10000
-              num_writers: 4
       eval:
       - provider_id: ${env.TRUSTYAI_LMEVAL_USE_K8S:+trustyai_lmeval}
         provider_type: remote::trustyai_lmeval
@@ -97,23 +83,6 @@ data:
         config: {}
       - provider_id: llm-as-judge
         provider_type: inline::llm-as-judge
-        config: {}
-      tool_runtime:
-      - provider_id: ${env.BRAVE_SEARCH_API_KEY:+brave-search}
-        provider_type: remote::brave-search
-        config:
-          api_key: ${env.BRAVE_SEARCH_API_KEY:=}
-          max_results: 3
-      - provider_id: tavily-search
-        provider_type: remote::tavily-search
-        config:
-          api_key: ${env.TAVILY_SEARCH_API_KEY:=}
-          max_results: 3
-      - provider_id: rag-runtime
-        provider_type: inline::rag-runtime
-        config: {}
-      - provider_id: model-context-protocol
-        provider_type: remote::model-context-protocol
         config: {}
       files:
       - provider_id: meta-reference-files
@@ -178,10 +147,5 @@ data:
       datasets: []
       scoring_fns: []
       benchmarks: []
-      tool_groups:
-      - toolgroup_id: builtin::websearch
-        provider_id: tavily-search
-      - toolgroup_id: builtin::rag
-        provider_id: rag-runtime
     server:
       port: 8321

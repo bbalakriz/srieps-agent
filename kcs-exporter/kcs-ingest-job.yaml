@@ -49,7 +49,7 @@ spec:
             claimName: kcs-data
       containers:
         - name: kcs-ingest
-          image: quay.io/balki404/sreips-hermes-kcs-exporter:0.0.1
+          image: quay.io/balki404/sreips-hermes-kcs-exporter:0.0.2
           imagePullPolicy: Always
           resources:
             requests:

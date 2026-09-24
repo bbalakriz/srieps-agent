@@ -96,7 +96,6 @@ spec:
   resources:
     requests:
       storage: 2Gi
-  storageClassName: gp3-csi
 ---
 apiVersion: v1
 kind: Service

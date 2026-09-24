@@ -163,7 +163,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: minio/mc:latest
+          image: quay.io/minio/mc
           env:
             - name: MC_CONFIG_DIR
               value: /tmp/mc
