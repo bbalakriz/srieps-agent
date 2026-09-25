@@ -19,9 +19,41 @@ def register_vector_db(
     vector_db_id: str,
     embed_model_id: str,
 ) -> str:
+    import urllib.request
+
     from llama_stack_client import LlamaStackClient
 
     client = LlamaStackClient(base_url=service_url)
+
+    def list_all_vector_stores() -> list:
+        # vector_stores.list() only returns one page. duplicates have piled
+        # up here before (each run calling create() unconditionally), so a
+        # plain list() call is not enough to know whether one truly exists.
+        all_stores = []
+        after = None
+        while True:
+            page = client.vector_stores.list(after=after) if after else client.vector_stores.list()
+            all_stores.extend(page.data)
+            if not getattr(page, "has_more", False):
+                break
+            after = getattr(page, "last_id", None)
+            if not after:
+                break
+        return all_stores
+
+    # this run's ingestion is a full refresh of a small, curated pdf set,
+    # not an incremental append, so reusing an existing store as is would
+    # just re-insert every chunk again on top of what is already there.
+    # delete any existing store with this name first, then create a clean
+    # one below, that is the only way to keep reruns from duplicating
+    # content without also having to check every chunk id before insert.
+    existing = next((s for s in list_all_vector_stores() if s.name == vector_db_id), None)
+    if existing:
+        print(f"Found existing vector store '{existing.id}' (name='{vector_db_id}'), deleting it for a clean refresh.")
+        req = urllib.request.Request(
+            f"{service_url.rstrip('/')}/v1/vector_stores/{existing.id}", method="DELETE"
+        )
+        urllib.request.urlopen(req).read()
 
     available = []
     stack_model_id = None
@@ -323,7 +355,7 @@ def docling_convert(
 # disabling GPU by default for broader compatibility
 @dsl.pipeline()
 def docling_convert_pipeline(
-    base_url: str = "https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master",
+    base_url: str = "https://raw.githubusercontent.com/bbalakriz/sreips-internal-kb/master",
     pdf_filenames: str = "SREIPS-Prod-troubleshooting-Knowledge-Base.pdf",
     num_workers: int = 1,
     vector_db_id: str = "sreips_vector_id",

@@ -49,8 +49,8 @@ JSON_PAYLOAD=$(jq -n \
   --arg pipeline_id "$PIPELINE_ID" \
   --arg experiment_id "$EXPERIMENT_ID" \
   '{
-    "display_name": "auto-run-every-2h",
-    "description": "Trigger this pipeline every 2 hours",
+    "display_name": "auto-run-every-12h",
+    "description": "Trigger this pipeline every 12 hours",
     "pipeline_version_reference": {
       "pipeline_id": $pipeline_id
     },
@@ -59,7 +59,7 @@ JSON_PAYLOAD=$(jq -n \
     "no_catchup": true,
     "trigger": {
       "cron_schedule": {
-        "cron": "0 */2 * * *"
+        "cron": "0 */12 * * *"
       }
     },
     "mode": "ENABLE"

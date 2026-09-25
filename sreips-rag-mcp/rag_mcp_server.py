@@ -16,6 +16,24 @@ VECTOR_DB_ID = os.getenv("VECTOR_DB_ID", "sreips_vector_id")
 _vector_store_uuid: str | None = None
 
 
+def _list_all_vector_stores(client) -> list:
+    """vector_stores.list() only returns one page. once enough stores pile
+    up (a duplicate storm from a misbehaving ingest pipeline, for example)
+    the real match can end up past page one, and a plain list() call would
+    wrongly conclude it does not exist, so walk every page."""
+    all_stores = []
+    after = None
+    while True:
+        page = client.vector_stores.list(after=after) if after else client.vector_stores.list()
+        all_stores.extend(page.data)
+        if not getattr(page, "has_more", False):
+            break
+        after = getattr(page, "last_id", None)
+        if not after:
+            break
+    return all_stores
+
+
 def _resolve_vector_store_uuid() -> str:
     global _vector_store_uuid
     if _vector_store_uuid is not None:
@@ -25,10 +43,10 @@ def _resolve_vector_store_uuid() -> str:
     from llama_stack_client import LlamaStackClient
 
     client = LlamaStackClient(base_url=LLAMA_STACK_URL)
-    stores = client.vector_stores.list()
-    match = next((s for s in stores.data if s.name == VECTOR_DB_ID), None)
+    stores = _list_all_vector_stores(client)
+    match = next((s for s in stores if s.name == VECTOR_DB_ID), None)
     if not match:
-        available = [s.name for s in stores.data]
+        available = [s.name for s in stores]
         raise RuntimeError(f"Vector store '{VECTOR_DB_ID}' not found. Available: {available}")
     _vector_store_uuid = match.id
     return _vector_store_uuid

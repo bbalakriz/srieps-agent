@@ -23,6 +23,7 @@ import os
 import json
 import time
 import argparse
+import urllib.request
 
 from llama_stack_client import LlamaStackClient
 
@@ -86,16 +87,43 @@ def resolve_embedding_model(client: LlamaStackClient, embed_model_id: str) -> tu
     )
 
 
-def ensure_vector_store(client: LlamaStackClient, name: str, embed_model_id: str) -> str:
+def _list_all_vector_stores(client: LlamaStackClient) -> list:
+    """vector_stores.list() only returns one page. duplicates have piled up
+    on this cluster before, and once page one fills up with them, a plain
+    list() call stops seeing stores that genuinely exist further back, so
+    walk every page rather than trusting the first one."""
+    all_stores = []
+    after = None
+    while True:
+        page = client.vector_stores.list(after=after) if after else client.vector_stores.list()
+        all_stores.extend(page.data)
+        if not getattr(page, "has_more", False):
+            break
+        after = getattr(page, "last_id", None)
+        if not after:
+            break
+    return all_stores
+
+
+def ensure_vector_store(client: LlamaStackClient, llama_stack_url: str, name: str, embed_model_id: str) -> str:
     """
-    Return the UUID for the named vector store, creating it only if needed.
+    Return the UUID for a fresh vector store with this name.
     vector_stores.create() is NOT idempotent — check first to avoid duplicates.
+
+    this is a full refresh of a small, curated article set on every run, not
+    an incremental append, so an existing store with this name is deleted
+    first rather than reused, otherwise every rerun would re-upload every
+    article as a brand new file attached to the same store, duplicating
+    content indefinitely instead of just refreshing it.
     """
-    stores = client.vector_stores.list()
-    existing = next((s for s in stores.data if s.name == name), None)
+    stores = _list_all_vector_stores(client)
+    existing = next((s for s in stores if s.name == name), None)
     if existing:
-        print(f"Using existing vector store '{existing.id}' (name='{name}')")
-        return existing.id
+        print(f"Found existing vector store '{existing.id}' (name='{name}'), deleting it for a clean refresh.")
+        req = urllib.request.Request(
+            f"{llama_stack_url.rstrip('/')}/v1/vector_stores/{existing.id}", method="DELETE"
+        )
+        urllib.request.urlopen(req).read()
 
     stack_model_id, embedding_dimension = resolve_embedding_model(client, embed_model_id)
 
@@ -143,7 +171,7 @@ def upload_article(client: LlamaStackClient, vector_store_uuid: str, record: dic
 
 def ingest(llama_stack_url: str, input_path: str, vector_db_id: str, embed_model_id: str):
     client = LlamaStackClient(base_url=llama_stack_url)
-    vector_store_uuid = ensure_vector_store(client, vector_db_id, embed_model_id)
+    vector_store_uuid = ensure_vector_store(client, llama_stack_url, vector_db_id, embed_model_id)
 
     total = 0
     skipped = 0

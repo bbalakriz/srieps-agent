@@ -2,7 +2,7 @@
 # Name: docling-convert-pipeline
 # Description: Converts PDF documents in a git repository to Markdown using Docling and generates embeddings
 # Inputs:
-#    base_url: str [Default: 'https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master']
+#    base_url: str [Default: 'https://raw.githubusercontent.com/bbalakriz/sreips-internal-kb/master']
 #    embed_model_id: str [Default: 'ibm-granite/granite-embedding-125m-english']
 #    max_tokens: int [Default: 512.0]
 #    num_workers: int [Default: 1.0]
@@ -321,7 +321,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -357,7 +357,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -507,7 +507,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -652,7 +652,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -692,7 +692,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -707,8 +707,28 @@ deploymentSpec:
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef register_vector_db(\n    service_url: str,\n    vector_db_id:\
-          \ str,\n    embed_model_id: str,\n) -> str:\n    from llama_stack_client\
-          \ import LlamaStackClient\n\n    client = LlamaStackClient(base_url=service_url)\n\
+          \ str,\n    embed_model_id: str,\n) -> str:\n    import urllib.request\n\
+          \n    from llama_stack_client import LlamaStackClient\n\n    client = LlamaStackClient(base_url=service_url)\n\
+          \n    def list_all_vector_stores() -> list:\n        # vector_stores.list()\
+          \ only returns one page. duplicates have piled\n        # up here before\
+          \ (each run calling create() unconditionally), so a\n        # plain list()\
+          \ call is not enough to know whether one truly exists.\n        all_stores\
+          \ = []\n        after = None\n        while True:\n            page = client.vector_stores.list(after=after)\
+          \ if after else client.vector_stores.list()\n            all_stores.extend(page.data)\n\
+          \            if not getattr(page, \"has_more\", False):\n              \
+          \  break\n            after = getattr(page, \"last_id\", None)\n       \
+          \     if not after:\n                break\n        return all_stores\n\n\
+          \    # this run's ingestion is a full refresh of a small, curated pdf set,\n\
+          \    # not an incremental append, so reusing an existing store as is would\n\
+          \    # just re-insert every chunk again on top of what is already there.\n\
+          \    # delete any existing store with this name first, then create a clean\n\
+          \    # one below, that is the only way to keep reruns from duplicating\n\
+          \    # content without also having to check every chunk id before insert.\n\
+          \    existing = next((s for s in list_all_vector_stores() if s.name == vector_db_id),\
+          \ None)\n    if existing:\n        print(f\"Found existing vector store\
+          \ '{existing.id}' (name='{vector_db_id}'), deleting it for a clean refresh.\"\
+          )\n        req = urllib.request.Request(\n            f\"{service_url.rstrip('/')}/v1/vector_stores/{existing.id}\"\
+          , method=\"DELETE\"\n        )\n        urllib.request.urlopen(req).read()\n\
           \n    available = []\n    stack_model_id = None\n    embedding_dimension\
           \ = 768\n    for m in client.models.list():\n        md = m.custom_metadata\
           \ or {}\n        if md.get(\"model_type\") != \"embedding\":\n         \
@@ -818,7 +838,7 @@ root:
   inputDefinitions:
     parameters:
       base_url:
-        defaultValue: https://raw.githubusercontent.com/bbalakriz/rh-kcs-mcp/master
+        defaultValue: https://raw.githubusercontent.com/bbalakriz/sreips-internal-kb/master
         description: Base URL to fetch PDF files from
         isOptional: true
         parameterType: STRING
@@ -858,7 +878,7 @@ root:
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.16.1
+sdkVersion: kfp-2.17.0
 ---
 platforms:
   kubernetes:

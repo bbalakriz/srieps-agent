@@ -24,8 +24,21 @@
 #   4. Watch progress:
 #        oc -n llamastack logs -l app=kcs-ingest -f
 #
+#   5. Restart redhat-api-mcp after any future manual ingest run:
+#   oc rollout restart deployment/redhat-api-mcp -n mcp-servers
+#
 # Each invocation creates a uniquely named Job (generateName).
 # Completed Jobs auto-delete after 24 h (ttlSecondsAfterFinished).
+#
+# this is a full refresh, not an incremental append. ensure_vector_store()
+# deletes the existing kcs_vector_id store first, then recreates it and
+# repopulates it from whatever ndjson is currently staged on the PVC. make
+# sure that file is current and complete before triggering, an old or
+# partial ndjson will silently replace good content with less.
+#
+# rh-kcs-mcp caches the resolved vector store UUID in memory once resolved,
+# so it will keep pointing at the deleted store until it re-resolves. so, restart
+# redhat-api-mcp after any future manual ingest run to clear the cache.
 ---
 apiVersion: batch/v1
 kind: Job
@@ -49,7 +62,7 @@ spec:
             claimName: kcs-data
       containers:
         - name: kcs-ingest
-          image: quay.io/balki404/sreips-hermes-kcs-exporter:0.0.2
+          image: quay.io/balki404/sreips-hermes-kcs-exporter:0.0.3
           imagePullPolicy: Always
           resources:
             requests:

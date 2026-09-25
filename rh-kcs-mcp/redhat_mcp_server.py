@@ -40,16 +40,34 @@ KCS_VECTOR_DB_ID = os.getenv("KCS_VECTOR_DB_ID", "kcs_vector_id")
 _kcs_vector_store_uuid: str | None = None  # cached UUID; resolved on first query
 
 
+def _list_all_vector_stores(client) -> list:
+    """vector_stores.list() only returns one page. once enough stores pile
+    up (a duplicate storm from a misbehaving ingest job, for example) the
+    real match can end up past page one, and a plain list() call would
+    wrongly conclude it does not exist, so walk every page."""
+    all_stores = []
+    after = None
+    while True:
+        page = client.vector_stores.list(after=after) if after else client.vector_stores.list()
+        all_stores.extend(page.data)
+        if not getattr(page, "has_more", False):
+            break
+        after = getattr(page, "last_id", None)
+        if not after:
+            break
+    return all_stores
+
+
 def _resolve_vector_store_uuid() -> str:
     """Resolve KCS_VECTOR_DB_ID name to its vs_xxx UUID via vector_stores.list()."""
     if not LLAMA_STACK_URL:
         raise RuntimeError("LLAMA_STACK_URL must be set when KCS_MODE=offline")
     from llama_stack_client import LlamaStackClient
     client = LlamaStackClient(base_url=LLAMA_STACK_URL)
-    stores = client.vector_stores.list()
-    match = next((s for s in stores.data if s.name == KCS_VECTOR_DB_ID), None)
+    stores = _list_all_vector_stores(client)
+    match = next((s for s in stores if s.name == KCS_VECTOR_DB_ID), None)
     if not match:
-        available = [s.name for s in stores.data]
+        available = [s.name for s in stores]
         raise RuntimeError(
             f"Vector store '{KCS_VECTOR_DB_ID}' not found. Available: {available}"
         )
